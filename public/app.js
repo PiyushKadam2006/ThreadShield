@@ -3,9 +3,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Application State
   const state = {
     activeTab: 'upload', // 'upload' or 'samples'
-    selectedFile: null,
+    engine: 'cpp', // 'cpp' (Mode A) or 'defender' (Mode B)
+    selectedFiles: [], // Array of File objects
     mode: 'parallel',
-    workers: 4,
+    workers: 4, // 1, 2, 4, 8, or 'auto'
     signatures: ['TEST_SIGNATURE_ALPHA', 'TEST_SIGNATURE_BETA', 'TEST_SIGNATURE_GAMMA', 'TEST_SIGNATURE_DELTA'],
     extensions: ['.txt', '.log', '.csv'],
     maxSize: 26214400, // 25 MB
@@ -19,7 +20,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const el = {
     engineStatus: document.getElementById('engine-status'),
     compilerInfo: document.getElementById('compiler-info'),
+    defenderStatus: document.getElementById('defender-status'),
     cpuCores: document.getElementById('cpu-cores'),
+    autoCoresHint: document.getElementById('auto-cores-hint'),
     datasetFilesCount: document.getElementById('dataset-files-count'),
     datasetBytesSize: document.getElementById('dataset-bytes-size'),
 
@@ -30,19 +33,28 @@ document.addEventListener('DOMContentLoaded', () => {
     uploadActions: document.getElementById('upload-actions'),
     samplesActions: document.getElementById('samples-actions'),
 
+    cardEngineCpp: document.getElementById('card-engine-cpp'),
+    cardEngineDefender: document.getElementById('card-engine-defender'),
+    concurrencyControls: document.getElementById('concurrency-controls'),
+    signaturesGroup: document.getElementById('signatures-group'),
+    startScanBtnLabel: document.getElementById('start-scan-btn-label'),
+
     fileDropzone: document.getElementById('file-dropzone'),
     userFileInput: document.getElementById('user-file-input'),
     dropzonePrompt: document.getElementById('dropzone-prompt'),
-    selectedFileCard: document.getElementById('selected-file-card'),
-    selectedFileName: document.getElementById('selected-file-name'),
-    selectedFileSize: document.getElementById('selected-file-size'),
-    selectedFileType: document.getElementById('selected-file-type'),
-    btnClearFile: document.getElementById('btn-clear-file'),
+    selectedFilesContainer: document.getElementById('selected-files-container'),
+    batchStats: document.getElementById('batch-stats'),
+    filesList: document.getElementById('files-list'),
+    btnAddMore: document.getElementById('btn-add-more'),
+    btnLoadFixture: document.getElementById('btn-load-fixture'),
+    btnLoadFixtureTop: document.getElementById('btn-load-fixture-top'),
+    btnClearAll: document.getElementById('btn-clear-all'),
 
     btnModeParallel: document.getElementById('btn-mode-parallel'),
     btnModeSequential: document.getElementById('btn-mode-sequential'),
     workerPills: document.getElementById('worker-pills'),
     workerCountGroup: document.getElementById('worker-count-group'),
+    pillAuto: document.getElementById('pill-auto'),
     maxFileSize: document.getElementById('max-file-size'),
 
     btnStartUploadScan: document.getElementById('btn-start-upload-scan'),
@@ -53,6 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     metricTime: document.getElementById('metric-time'),
     metricThroughput: document.getElementById('metric-throughput'),
+    metricQueueStatus: document.getElementById('metric-queue-status'),
     metricBytes: document.getElementById('metric-bytes'),
     metricMatches: document.getElementById('metric-matches'),
     metricClean: document.getElementById('metric-clean'),
@@ -96,19 +109,33 @@ document.addEventListener('DOMContentLoaded', () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  // Load System & Sample Dataset Info
+  // Load System & Environment Info
   async function loadSystemInfo() {
     try {
       const res = await fetch('/api/system/info');
       const data = await res.json();
       state.system = data;
 
-      el.cpuCores.textContent = `${data.cpus} Logical Cores (${data.cpuModel})`;
+      const logicalCores = data.cpus || 4;
+      el.cpuCores.textContent = `${logicalCores} Logical Cores (${data.cpuModel})`;
+      if (el.pillAuto) {
+        el.pillAuto.textContent = `Auto (${logicalCores})`;
+        el.autoCoresHint.textContent = `Auto = ${logicalCores} logical CPU cores`;
+      }
+
       if (data.compiler && data.compiler.detected) {
         el.compilerInfo.textContent = `${data.compiler.type} (${data.compiler.path})`;
       } else {
         el.compilerInfo.textContent = 'None detected';
         el.compilerInfo.classList.add('missing');
+      }
+
+      if (data.defender && data.defender.available) {
+        el.defenderStatus.textContent = 'MpCmdRun.exe Ready';
+        el.defenderStatus.classList.add('ready');
+      } else {
+        el.defenderStatus.textContent = 'Not available';
+        el.defenderStatus.classList.add('missing');
       }
 
       if (data.executable && data.executable.compiled) {
@@ -174,38 +201,176 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // File Selection Handling
-  function handleFileSelection(file) {
-    if (!file) return;
+  // Engine Mode Selection (Mode A: C++ vs Mode B: Defender)
+  function setEngineMode(engine) {
+    state.engine = engine;
+    if (engine === 'cpp') {
+      el.cardEngineCpp.classList.add('active');
+      el.cardEngineDefender.classList.remove('active');
+      el.concurrencyControls.style.display = 'block';
+      el.startScanBtnLabel.textContent = 'Start Multithreaded Scan (C++17 Engine)';
+      initWorkerCards(getEffectiveWorkerCount());
+    } else {
+      el.cardEngineDefender.classList.add('active');
+      el.cardEngineCpp.classList.remove('active');
+      el.concurrencyControls.style.display = 'none';
+      el.startScanBtnLabel.textContent = 'Start Microsoft Defender Scan (CLI)';
+      initWorkerCards(1, 'Microsoft Defender CLI');
+    }
+  }
 
-    const MAX_ALLOWED = 25 * 1024 * 1024; // 25 MB
-    if (file.size > MAX_ALLOWED) {
-      showToast(`Selected file exceeds the 25 MB limit (${formatBytes(file.size)}).`, true);
-      clearFileSelection();
+  // Multiple File Selection Handling
+  function addFilesToSelection(fileList) {
+    if (!fileList || fileList.length === 0) return;
+
+    const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
+    const MAX_BATCH_SIZE = 100 * 1024 * 1024; // 100 MB
+    const MAX_FILE_COUNT = 50;
+
+    let addedCount = 0;
+    let rejectedOversize = 0;
+
+    const filesArray = Array.from(fileList);
+    for (const file of filesArray) {
+      if (state.selectedFiles.length >= MAX_FILE_COUNT) {
+        showToast(`Maximum batch limit of ${MAX_FILE_COUNT} files reached.`, true);
+        break;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        rejectedOversize++;
+        continue;
+      }
+
+      // Check current total batch size
+      const currentBatchBytes = state.selectedFiles.reduce((sum, f) => sum + f.size, 0);
+      if (currentBatchBytes + file.size > MAX_BATCH_SIZE) {
+        showToast(`Total batch size limit of 100 MB exceeded.`, true);
+        break;
+      }
+
+      // Avoid exact duplicate file entries
+      const alreadyExists = state.selectedFiles.some(f => 
+        f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
+      );
+
+      if (!alreadyExists) {
+        state.selectedFiles.push(file);
+        addedCount++;
+      }
+    }
+
+    if (rejectedOversize > 0) {
+      showToast(`${rejectedOversize} file(s) exceeded the 25 MB per-file limit and were skipped.`, true);
+    } else if (addedCount > 0) {
+      showToast(`Added ${addedCount} file(s) to scan queue.`);
+    }
+
+    renderSelectedFilesList();
+  }
+
+  function removeFileByIndex(index) {
+    if (index >= 0 && index < state.selectedFiles.length) {
+      const removed = state.selectedFiles.splice(index, 1)[0];
+      showToast(`Removed ${removed.name} from queue.`);
+      renderSelectedFilesList();
+    }
+  }
+
+  function clearAllFiles() {
+    state.selectedFiles = [];
+    el.userFileInput.value = '';
+    renderSelectedFilesList();
+    showToast('Cleared all selected files.');
+  }
+
+  // Load Harmless Educational Test Fixture
+  async function loadTestFixture() {
+    try {
+      const fixturePayload = 
+`[ThreadShield Educational Test Fixture]
+Timestamp: ${new Date().toISOString()}
+Target Marker: TEST_SIGNATURE_ALPHA
+Note: This is a harmless academic test payload generated to demonstrate multithreaded signature pattern detection safely without actual malware.`;
+
+      const fixtureFile = new File([fixturePayload], `harmless_test_alpha_${Date.now().toString().slice(-4)}.txt`, {
+        type: 'text/plain',
+        lastModified: Date.now()
+      });
+
+      addFilesToSelection([fixtureFile]);
+      showToast('Loaded harmless educational test fixture (TEST_SIGNATURE_ALPHA).');
+    } catch (e) {
+      showToast(`Error creating fixture: ${e.message}`, true);
+    }
+  }
+
+  // Render Selected Files Queue
+  function renderSelectedFilesList() {
+    if (state.selectedFiles.length === 0) {
+      el.selectedFilesContainer.classList.add('hidden');
+      el.dropzonePrompt.classList.remove('hidden');
+      el.metricQueueStatus.textContent = '0 / 0';
       return;
     }
 
-    state.selectedFile = file;
-    el.selectedFileName.textContent = file.name;
-    el.selectedFileSize.textContent = formatBytes(file.size);
-    el.selectedFileType.textContent = file.type || 'Binary / Custom format';
-
+    el.selectedFilesContainer.classList.remove('hidden');
     el.dropzonePrompt.classList.add('hidden');
-    el.selectedFileCard.classList.remove('hidden');
-    showToast(`File selected: ${file.name} (${formatBytes(file.size)})`);
+
+    const totalBytes = state.selectedFiles.reduce((sum, f) => sum + f.size, 0);
+    el.batchStats.textContent = `${state.selectedFiles.length} file(s) selected • ${formatBytes(totalBytes)} / 100 MB max`;
+    el.metricQueueStatus.textContent = `0 / ${state.selectedFiles.length}`;
+
+    el.filesList.innerHTML = state.selectedFiles.map((file, idx) => {
+      const ext = (file.name.split('.').pop() || 'dat').toLowerCase();
+      return `
+        <div class="file-row" id="file-queue-row-${idx}">
+          <div class="file-row-left">
+            <div class="file-row-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                <polyline points="13 2 13 9 20 9"></polyline>
+              </svg>
+            </div>
+            <div class="file-row-info">
+              <div class="file-row-name mono" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+              <div class="file-row-meta">
+                <span>${formatBytes(file.size)}</span> • <span>${escapeHtml(file.type || '.' + ext)}</span>
+              </div>
+            </div>
+          </div>
+          <div class="file-row-right">
+            <span class="badge" id="file-queue-status-${idx}">Ready</span>
+            <button type="button" class="btn-remove-file" data-index="${idx}" title="Remove file">✕</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach remove handlers
+    el.filesList.querySelectorAll('.btn-remove-file').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = Number(btn.dataset.index);
+        removeFileByIndex(idx);
+      });
+    });
   }
 
-  function clearFileSelection() {
-    state.selectedFile = null;
-    el.userFileInput.value = '';
-    el.selectedFileCard.classList.add('hidden');
-    el.dropzonePrompt.classList.remove('hidden');
+  // Resolve Effective Worker Count
+  function getEffectiveWorkerCount() {
+    if (state.mode === 'sequential') return 1;
+    if (state.workers === 'auto') {
+      return (state.system && state.system.cpus) ? state.system.cpus : 4;
+    }
+    return Number(state.workers) || 4;
   }
 
   // Worker Cards UI
-  function initWorkerCards(workerCount) {
+  function initWorkerCards(workerCount, customTitle = null) {
     el.workerGrid.innerHTML = '';
-    el.activeWorkerBadge.textContent = `${workerCount} Worker Thread${workerCount > 1 ? 's' : ''} Configured`;
+    const label = customTitle || `${workerCount} Worker Thread${workerCount > 1 ? 's' : ''} Configured`;
+    el.activeWorkerBadge.textContent = label;
 
     for (let i = 1; i <= workerCount; i++) {
       const card = document.createElement('div');
@@ -213,17 +378,17 @@ document.addEventListener('DOMContentLoaded', () => {
       card.id = `worker-card-${i}`;
       card.innerHTML = `
         <div class="worker-card-header">
-          <span class="worker-title">Worker #${i}</span>
+          <span class="worker-title">${customTitle ? 'Engine Worker' : 'Worker #' + i}</span>
           <span class="worker-status-dot" id="worker-dot-${i}"></span>
         </div>
-        <div class="worker-file mono" id="worker-file-${i}">Ready</div>
-        <div class="worker-count" id="worker-count-${i}">0 files scanned</div>
+        <div class="worker-file mono" id="worker-file-${i}">Ready in SafeQueue</div>
+        <div class="worker-count" id="worker-count-${i}">0 tasks processed</div>
       `;
       el.workerGrid.appendChild(card);
     }
   }
 
-  function updateWorkerCard(id, file, status, count) {
+  function updateWorkerCard(id, file, status, count, tasksProcessed, wasActive) {
     const card = document.getElementById(`worker-card-${id}`);
     const dot = document.getElementById(`worker-dot-${id}`);
     const fileLabel = document.getElementById(`worker-file-${id}`);
@@ -232,25 +397,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!card) return;
 
     if (status === 'scanning') {
-      card.classList.add('active');
+      card.className = 'worker-card active';
       dot.className = 'worker-status-dot scanning';
       fileLabel.textContent = file;
     } else if (status === 'finished') {
       card.classList.remove('active');
-      dot.className = 'worker-status-dot finished';
-      fileLabel.textContent = 'Completed';
+      if (wasActive === false || (tasksProcessed === 0 && count === 0)) {
+        card.className = 'worker-card unassigned';
+        dot.className = 'worker-status-dot unassigned';
+        fileLabel.textContent = 'Unassigned / Idle (0 tasks)';
+      } else {
+        card.className = 'worker-card';
+        dot.className = 'worker-status-dot finished';
+        fileLabel.textContent = file || 'Completed';
+      }
     } else {
-      card.classList.remove('active');
+      card.className = 'worker-card';
       dot.className = 'worker-status-dot';
       fileLabel.textContent = file || 'Idle';
     }
 
-    if (countLabel && count !== undefined) {
-      countLabel.textContent = `${count} task${count === 1 ? '' : 's'} processed`;
+    if (countLabel) {
+      const finalCount = (tasksProcessed !== undefined) ? tasksProcessed : (count || 0);
+      countLabel.textContent = `${finalCount} task${finalCount === 1 ? '' : 's'} processed`;
     }
   }
 
-  // Mode & Options
+  // Concurrency Mode & Options
   function setMode(mode) {
     state.mode = mode;
     if (mode === 'sequential') {
@@ -258,16 +431,13 @@ document.addEventListener('DOMContentLoaded', () => {
       el.btnModeParallel.classList.remove('active');
       el.workerCountGroup.style.opacity = '0.4';
       el.workerCountGroup.style.pointerEvents = 'none';
-      state.workers = 1;
       initWorkerCards(1);
     } else {
       el.btnModeParallel.classList.add('active');
       el.btnModeSequential.classList.remove('active');
       el.workerCountGroup.style.opacity = '1';
       el.workerCountGroup.style.pointerEvents = 'auto';
-      const activePill = el.workerPills.querySelector('.pill-btn.active');
-      state.workers = activePill ? Number(activePill.dataset.workers) : 4;
-      initWorkerCards(state.workers);
+      initWorkerCards(getEffectiveWorkerCount());
     }
   }
 
@@ -282,20 +452,22 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Reset UI before scan execution
-  function resetScanUI() {
+  function resetScanUI(totalFiles) {
     state.allResults = [];
-    el.resultsTbody.innerHTML = '<tr class="empty-row"><td colspan="7">Scanning in progress via C++ multithreaded engine...</td></tr>';
+    el.resultsTbody.innerHTML = '<tr class="empty-row"><td colspan="8">Scanning in progress... Task dispatching across workers.</td></tr>';
     el.metricTime.textContent = '0.0 ms';
     el.metricThroughput.textContent = '0.0 MB/s';
+    el.metricQueueStatus.textContent = `0 / ${totalFiles}`;
     el.metricBytes.textContent = '0 B';
     el.metricMatches.textContent = '0';
     el.metricClean.textContent = '0';
     el.progressBarFill.style.width = '0%';
-    el.progressText.textContent = 'Starting C++ engine...';
+    el.progressText.textContent = `0 / ${totalFiles} files (0%)`;
     el.scanStateBadge.textContent = 'Status: RUNNING';
     el.scanStateBadge.className = 'progress-status';
 
-    initWorkerCards(state.workers);
+    const effectiveWorkers = (state.engine === 'defender') ? 1 : getEffectiveWorkerCount();
+    initWorkerCards(effectiveWorkers, state.engine === 'defender' ? 'Microsoft Defender Antivirus CLI' : null);
 
     el.btnStartUploadScan.disabled = true;
     el.btnStartSamplesScan.disabled = true;
@@ -305,31 +477,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Start User File Upload Scan
   async function startUploadScan() {
-    if (!state.selectedFile) {
-      showToast('Please select a local file to scan first.', true);
+    if (state.selectedFiles.length === 0) {
+      showToast('Please select at least one file to scan.', true);
       return;
     }
 
     const sigs = getSelectedSignatures();
-    if (sigs.length === 0) {
-      showToast('Please enable at least one test signature.', true);
+    if (state.engine === 'cpp' && sigs.length === 0) {
+      showToast('Please enable at least one test signature for Mode A.', true);
       return;
     }
 
     state.signatures = sigs;
     state.maxSize = Number(el.maxFileSize.value);
 
-    resetScanUI();
+    resetScanUI(state.selectedFiles.length);
 
     const formData = new FormData();
-    formData.append('file', state.selectedFile);
+    state.selectedFiles.forEach(file => {
+      formData.append('files', file);
+    });
+
+    formData.append('engine', state.engine);
     formData.append('mode', state.mode);
     formData.append('workers', state.workers);
     formData.append('signatures', state.signatures.join(','));
     formData.append('maxSize', state.maxSize);
 
     try {
-      showToast(`Uploading ${state.selectedFile.name} to 127.0.0.1 for C++ scan...`);
+      const engineLabel = state.engine === 'defender' ? 'Microsoft Defender CLI' : `C++ (${state.mode.toUpperCase()})`;
+      showToast(`Uploading ${state.selectedFiles.length} file(s) to 127.0.0.1 for ${engineLabel} scan...`);
+
       const res = await fetch('/api/scan/upload', {
         method: 'POST',
         body: formData
@@ -342,7 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      showToast(`Scan running (${state.mode.toUpperCase()} - ${state.workers} worker${state.workers > 1 ? 's' : ''})`);
+      showToast(`Scan running: ${engineLabel}`);
       pollScanStatus();
     } catch (err) {
       showToast(`Scan request failed: ${err.message}`, true);
@@ -364,7 +542,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.extensions = exts;
     state.maxSize = Number(el.maxFileSize.value);
 
-    resetScanUI();
+    resetScanUI(100);
 
     try {
       const res = await fetch('/api/scan/start', {
@@ -386,7 +564,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      showToast(`Samples scan running (${state.mode.toUpperCase()} - ${state.workers} workers)`);
+      showToast(`Samples scan running (${state.mode.toUpperCase()} - ${getEffectiveWorkerCount()} workers)`);
       pollScanStatus();
     } catch (err) {
       showToast(`Scan request failed: ${err.message}`, true);
@@ -406,13 +584,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update progress
         const pct = (data.progress.percentage || 0).toFixed(1);
         el.progressBarFill.style.width = `${pct}%`;
-        el.progressText.textContent = `${data.progress.scanned_files || 0} / ${data.progress.total_files || 0} (${pct}%)`;
+        const total = data.progress.total_files || 0;
+        const scanned = data.progress.scanned_files || 0;
+        el.progressText.textContent = `${scanned} / ${total} files (${pct}%)`;
+        el.metricQueueStatus.textContent = `${scanned} / ${total}`;
 
         // Update workers
         if (data.workers) {
           for (const [wId, wData] of Object.entries(data.workers)) {
-            updateWorkerCard(wId, wData.file, wData.status, wData.count);
+            updateWorkerCard(wId, wData.file, wData.status, wData.count, wData.tasksProcessed, wData.wasActive);
           }
+        }
+
+        // Active vs Idle worker badge
+        if (data.summary && data.summary.active_workers !== undefined) {
+          const cfg = data.summary.worker_count;
+          const act = data.summary.active_workers;
+          const idl = data.summary.idle_workers;
+          el.activeWorkerBadge.textContent = `${cfg} Workers Configured (${act} Active, ${idl} Idle)`;
         }
 
         // Update logs & log count
@@ -454,9 +643,16 @@ document.addEventListener('DOMContentLoaded', () => {
             el.metricClean.textContent = data.summary.clean_files;
             el.progressBarFill.style.width = '100%';
             el.progressText.textContent = `${data.summary.scanned_files} / ${data.summary.total_files} (100%)`;
+
+            if (data.summary.active_workers !== undefined) {
+              const cfg = data.summary.worker_count;
+              const act = data.summary.active_workers;
+              const idl = data.summary.idle_workers;
+              el.activeWorkerBadge.textContent = `${cfg} Workers (${act} Active, ${idl} Idle)`;
+            }
           }
 
-          finishScanUI(data.status, data.error);
+          finishScanUI(data.status, data.error, data.summary);
         }
       } catch (e) {
         console.error('Polling error:', e);
@@ -464,7 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 180);
   }
 
-  function finishScanUI(status, errorMsg) {
+  function finishScanUI(status, errorMsg, summary) {
     el.btnStartUploadScan.disabled = false;
     el.btnStartSamplesScan.disabled = false;
     el.btnStopScan.disabled = true;
@@ -473,7 +669,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (status === 'completed') {
       el.scanStateBadge.textContent = 'Status: COMPLETED';
       el.scanStateBadge.className = 'progress-status ready';
-      showToast('Multithreaded C++ scan completed successfully.');
+      const engineName = summary?.engine || (state.engine === 'defender' ? 'Microsoft Defender CLI' : 'C++17 Multithreaded Engine');
+      showToast(`Scan completed successfully via ${engineName}.`);
     } else if (status === 'stopped') {
       el.scanStateBadge.textContent = 'Status: CANCELLED';
       el.scanStateBadge.className = 'progress-status missing';
@@ -508,16 +705,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     if (filtered.length === 0) {
-      el.resultsTbody.innerHTML = '<tr class="empty-row"><td colspan="7">No matching files found.</td></tr>';
+      el.resultsTbody.innerHTML = '<tr class="empty-row"><td colspan="8">No matching files found.</td></tr>';
       return;
     }
 
     el.resultsTbody.innerHTML = filtered.map((r, idx) => {
       let statusBadge = '';
       if (r.status === 'MATCH') {
-        statusBadge = `<span class="badge match">TEST SIGNATURE MATCHED</span>`;
+        const label = (r.engine && r.engine.includes('Defender')) ? 'THREAT DETECTED' : 'TEST SIGNATURE MATCHED';
+        statusBadge = `<span class="badge match">${label}</span>`;
       } else if (r.status === 'CLEAN') {
-        statusBadge = `<span class="badge clean">NO TEST SIGNATURE MATCHED</span>`;
+        const label = (r.engine && r.engine.includes('Defender')) ? 'CLEAN (0 THREATS)' : 'NO TEST SIGNATURE MATCHED';
+        statusBadge = `<span class="badge clean">${label}</span>`;
       } else if (r.status === 'SKIPPED') {
         statusBadge = `<span class="badge skipped">SKIPPED (SIZE LIMIT)</span>`;
       } else {
@@ -526,16 +725,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let details = '-';
       if (r.status === 'MATCH') {
-        details = `<span class="mono" style="color: var(--amber)">Matched: ${(r.signatures || []).join(', ')}</span>`;
+        details = `<span class="mono" style="color: var(--amber)">Matched: ${(r.signatures || []).join(', ') || 'Malware Pattern'}</span>`;
       } else if (r.message) {
         details = `<span class="text-muted">${escapeHtml(r.message)}</span>`;
       }
+
+      const engineBadge = (r.engine && r.engine.includes('Defender'))
+        ? `<span class="badge purple" style="font-size:0.68rem;">MS Defender</span>`
+        : `<span class="badge" style="font-size:0.68rem;">C++ Thread #${r.workerId}</span>`;
 
       return `
         <tr>
           <td>${idx + 1}</td>
           <td><span class="mono">Worker #${r.workerId}</span></td>
           <td class="mono"><strong>${escapeHtml(r.file)}</strong></td>
+          <td>${engineBadge}</td>
           <td>${statusBadge}</td>
           <td>${details}</td>
           <td class="mono">${formatBytes(r.fileSize || 0)}</td>
@@ -655,18 +859,24 @@ document.addEventListener('DOMContentLoaded', () => {
   el.tabBtnUpload.addEventListener('click', () => switchTab('upload'));
   el.tabBtnSamples.addEventListener('click', () => switchTab('samples'));
 
+  el.cardEngineCpp.addEventListener('click', () => setEngineMode('cpp'));
+  el.cardEngineDefender.addEventListener('click', () => setEngineMode('defender'));
+
   el.userFileInput.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelection(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      addFilesToSelection(e.target.files);
     }
   });
 
-  el.btnClearFile.addEventListener('click', (e) => {
-    e.stopPropagation();
-    clearFileSelection();
+  el.btnAddMore.addEventListener('click', () => {
+    el.userFileInput.click();
   });
 
-  // Drag and drop
+  el.btnLoadFixture.addEventListener('click', loadTestFixture);
+  el.btnLoadFixtureTop.addEventListener('click', loadTestFixture);
+  el.btnClearAll.addEventListener('click', clearAllFiles);
+
+  // Drag and drop for multiple files
   el.fileDropzone.addEventListener('dragover', (e) => {
     e.preventDefault();
     el.fileDropzone.classList.add('dragover');
@@ -679,8 +889,8 @@ document.addEventListener('DOMContentLoaded', () => {
   el.fileDropzone.addEventListener('drop', (e) => {
     e.preventDefault();
     el.fileDropzone.classList.remove('dragover');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelection(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      addFilesToSelection(e.dataTransfer.files);
     }
   });
 
@@ -688,11 +898,13 @@ document.addEventListener('DOMContentLoaded', () => {
   el.btnModeSequential.addEventListener('click', () => setMode('sequential'));
 
   el.workerPills.addEventListener('click', (e) => {
-    if (e.target.classList.contains('pill-btn')) {
+    const btn = e.target.closest('.pill-btn');
+    if (btn) {
       el.workerPills.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
-      e.target.classList.add('active');
-      state.workers = Number(e.target.dataset.workers);
-      initWorkerCards(state.workers);
+      btn.classList.add('active');
+      const val = btn.dataset.workers;
+      state.workers = (val === 'auto') ? 'auto' : Number(val);
+      initWorkerCards(getEffectiveWorkerCount());
     }
   });
 
@@ -706,7 +918,7 @@ document.addEventListener('DOMContentLoaded', () => {
   el.resultFilter.addEventListener('change', renderResultsTable);
 
   // Initialize
-  initWorkerCards(state.workers);
+  initWorkerCards(getEffectiveWorkerCount());
   loadSystemInfo();
   loadSamplesInfo();
 });

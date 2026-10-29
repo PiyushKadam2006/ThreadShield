@@ -1040,3 +1040,266 @@ body {
   padding: 1px 4px;
   border-radius: 3px;
 }
+
+/* ============================================================= */
+/* Multi-File Upload & Engine Selector Enhancements              */
+/* ============================================================= */
+
+.flex-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.btn-text-action {
+  background: none;
+  border: none;
+  color: var(--cyan);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transition);
+}
+
+.btn-text-action:hover {
+  color: #38bdf8;
+  text-decoration: underline;
+}
+
+/* Engine Selector Cards */
+.engine-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.engine-card {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.engine-card:hover {
+  border-color: rgba(14, 165, 233, 0.4);
+  background-color: rgba(14, 165, 233, 0.03);
+}
+
+.engine-card.active {
+  border-color: var(--cyan);
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(14, 165, 233, 0.05));
+  box-shadow: 0 0 12px var(--cyan-glow);
+}
+
+.engine-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.engine-card-header strong {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.engine-card p {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.engine-card code {
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* Multi-file Queue Container */
+.selected-files-container {
+  margin-top: 14px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.batch-title {
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.batch-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-xs {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--transition);
+}
+
+.btn-fixture {
+  background-color: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--amber);
+}
+
+.btn-fixture:hover {
+  background-color: var(--amber);
+  color: #0b0f19;
+}
+
+.btn-danger-text {
+  background: transparent;
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--coral);
+}
+
+.btn-danger-text:hover {
+  background-color: var(--coral);
+  color: #ffffff;
+}
+
+/* Scrollable Files List */
+.files-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+  gap: 10px;
+  transition: var(--transition);
+}
+
+.file-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: rgba(14, 165, 233, 0.3);
+}
+
+.file-row.matched {
+  border-color: rgba(245, 158, 11, 0.4);
+  background-color: rgba(245, 158, 11, 0.05);
+}
+
+.file-row.clean {
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.file-row-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.file-row-icon {
+  color: var(--cyan);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.file-row-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.file-row-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row-meta {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 6px;
+}
+
+.file-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-remove-file {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: var(--transition);
+}
+
+.btn-remove-file:hover {
+  color: var(--coral);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Worker Card Idle and Activity Styles */
+.worker-card.unassigned {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.worker-status-dot.idle {
+  background-color: var(--text-muted);
+}
+
+.worker-status-dot.unassigned {
+  background-color: #475569;
+}
+
+/* Update Pill Group for 5 items (Auto, 1, 2, 4, 8) */
+.pill-group {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+

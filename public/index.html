@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ThreadShield — Interactive Multithreaded File Scanner</title>
+  <title>ThreadShield — Multithreaded File Security Scanner</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,31 +22,35 @@
         </div>
         <div>
           <h1 class="header-title">ThreadShield</h1>
-          <p class="header-subtitle">Interactive Multithreaded File Scanner • Operating Systems Lab</p>
+          <p class="header-subtitle">Interactive Multithreaded File Scanner • Operating Systems Concurrent Architecture</p>
         </div>
       </div>
 
       <div class="header-safety-badge">
         <span class="pulse-indicator safe"></span>
         <div class="safety-text">
-          <strong>Educational Scanner Only</strong>
-          <span>Pattern Matching Simulation • 127.0.0.1 • Read-Only • No Quarantine/Delete</span>
+          <strong>Safe Educational Scanner</strong>
+          <span>Strict Localhost (127.0.0.1) • Read-Only Inspection • Non-Destructive</span>
         </div>
       </div>
     </header>
 
-    <!-- System Status Banner -->
+    <!-- System Status Bar -->
     <div class="system-bar" id="system-bar">
       <div class="sys-item">
         <span class="sys-label">C++ Engine:</span>
-        <span class="sys-value" id="engine-status">Checking...</span>
+        <span class="sys-value" id="engine-status">Detecting...</span>
       </div>
       <div class="sys-item">
         <span class="sys-label">Compiler:</span>
         <span class="sys-value" id="compiler-info">Detecting...</span>
       </div>
       <div class="sys-item">
-        <span class="sys-label">Host CPU Cores:</span>
+        <span class="sys-label">MS Defender CLI:</span>
+        <span class="sys-value" id="defender-status">Detecting...</span>
+      </div>
+      <div class="sys-item">
+        <span class="sys-label">Logical CPU Cores:</span>
         <span class="sys-value" id="cpu-cores">-</span>
       </div>
       <div class="sys-item">
@@ -67,7 +71,7 @@
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            Scan Your Own File
+            Scan Your Own Files
           </button>
           <button type="button" class="tab-btn" id="tab-btn-samples">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -79,7 +83,29 @@
 
         <!-- TAB 1: User File Upload Section -->
         <div id="section-upload" class="tab-content active">
-          <!-- Architecture Note explaining browser sandboxing & localhost upload -->
+          <!-- Engine Selection Cards -->
+          <div class="form-group">
+            <label class="form-label">Detection Engine Mode</label>
+            <div class="engine-selector">
+              <div class="engine-card active" id="card-engine-cpp" data-engine="cpp">
+                <div class="engine-card-header">
+                  <strong>Mode A: C++ Multithreading Engine</strong>
+                  <span class="badge">OS Lab Core</span>
+                </div>
+                <p>Native C++17 thread pool (<code>std::thread</code>), dynamic <code>SafeQueue</code> scheduling, atomic counters, and chunk-overlap signature scanning.</p>
+              </div>
+
+              <div class="engine-card" id="card-engine-defender" data-engine="defender">
+                <div class="engine-card-header">
+                  <strong>Mode B: Microsoft Defender Engine</strong>
+                  <span class="badge purple">Real Antivirus CLI</span>
+                </div>
+                <p>Spawns Windows Defender CLI (<code>MpCmdRun.exe -DisableRemediation</code>) to verify real virus definitions without modifying or quarantining files.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sandbox and Localhost Architecture Notice -->
           <div class="info-box">
             <div class="info-title">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -87,58 +113,72 @@
                 <line x1="12" y1="16" x2="12" y2="12"></line>
                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
               </svg>
-              Browser Sandbox & Localhost Upload Notice
+              Sandbox Architecture & Non-Destructive File Handling
             </div>
-            <p>Web browsers prevent websites from directly accessing arbitrary local filesystem paths. Selecting a file transmits a local copy directly to the ThreadShield server at <code>127.0.0.1</code> into a temporary directory for C++ engine multithreaded scanning. The temporary copy is <strong>automatically deleted immediately</strong> after scanning.</p>
+            <p>Browsers restrict direct local disk access. Selecting files copies them locally to <code>127.0.0.1</code> into a temporary directory strictly bounded by ThreadShield. <strong>Your original files are never altered, executed, or deleted.</strong> Temporary copies are purged immediately upon scan completion.</p>
           </div>
 
-          <!-- File Picker Dropzone -->
+          <!-- Multiple File Upload Dropzone -->
           <div class="form-group">
-            <label class="form-label">Select File to Scan (Any Format, max 25 MB)</label>
+            <div class="flex-between">
+              <label class="form-label">Select Files to Scan (Max 50 files, 25 MB/file, 100 MB batch)</label>
+              <button type="button" class="btn-text-action" id="btn-load-fixture-top" title="Load harmless test file containing TEST_SIGNATURE_ALPHA">
+                + Load Harmless Test Fixture
+              </button>
+            </div>
+
             <div class="file-dropzone" id="file-dropzone">
-              <input type="file" id="user-file-input" class="file-input-hidden">
+              <input type="file" id="user-file-input" class="file-input-hidden" multiple>
               <div class="dropzone-prompt" id="dropzone-prompt">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="17 8 12 3 7 8"></polyline>
                   <line x1="12" y1="3" x2="12" y2="15"></line>
                 </svg>
                 <div class="dropzone-text">
-                  <strong>Click to choose a file</strong> or drag and drop here
+                  <strong>Click to select multiple files</strong> or drag and drop here
                 </div>
-                <div class="dropzone-hint">Supports text, logs, code, binaries, zip, pdf, exe (up to 25 MB)</div>
+                <div class="dropzone-hint">Supports text, logs, code, binaries, zip, pdf, exe (any format up to 25 MB each)</div>
               </div>
+            </div>
+          </div>
 
-              <!-- Selected File Card (hidden by default) -->
-              <div class="selected-file-card hidden" id="selected-file-card">
-                <div class="selected-file-icon">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
-                    <polyline points="13 2 13 9 20 9"></polyline>
-                  </svg>
-                </div>
-                <div class="selected-file-details">
-                  <div class="selected-file-name mono" id="selected-file-name">filename.ext</div>
-                  <div class="selected-file-meta">
-                    <span id="selected-file-size">0 KB</span> • <span id="selected-file-type">text/plain</span>
-                  </div>
-                </div>
-                <button type="button" class="btn-clear-file" id="btn-clear-file" title="Remove selection">✕</button>
+          <!-- Selected Files Queue Container -->
+          <div class="selected-files-container hidden" id="selected-files-container">
+            <div class="batch-header">
+              <div class="batch-title">
+                <span class="mono" id="batch-stats">0 files selected (0 B)</span>
               </div>
+              <div class="batch-controls">
+                <button type="button" class="btn-xs btn-secondary" id="btn-add-more">
+                  + Add More
+                </button>
+                <button type="button" class="btn-xs btn-fixture" id="btn-load-fixture">
+                  + Add Test Fixture
+                </button>
+                <button type="button" class="btn-xs btn-danger-text" id="btn-clear-all">
+                  ✕ Clear All
+                </button>
+              </div>
+            </div>
+
+            <!-- Scrollable File List -->
+            <div class="files-list" id="files-list">
+              <!-- Dynamically populated files -->
             </div>
           </div>
         </div>
 
-        <!-- TAB 2: Samples Dataset Section (Alternative mode) -->
+        <!-- TAB 2: Samples Dataset Section (Benchmark Mode) -->
         <div id="section-samples" class="tab-content">
           <div class="dataset-card">
             <div class="dataset-meta">
-              <span>Samples Directory: <strong id="dataset-files-count">0</strong> files (<strong id="dataset-bytes-size">0 KB</strong>)</span>
+              <span>Samples Directory: <strong id="dataset-files-count">0</strong> test files (<strong id="dataset-bytes-size">0 KB</strong>)</span>
             </div>
-            <p class="field-hint" style="margin-top: 6px;">Batch scan preloaded test files across subdirectories to measure concurrent throughput and speedup.</p>
+            <p class="field-hint" style="margin-top: 6px;">Pre-generated academic dataset used to measure multi-core speedup and Amdahl's Law scaling across 1, 2, 4, and 8 threads.</p>
           </div>
           <div class="form-group" style="margin-top: 12px;">
-            <label class="form-label">Extension Filter (Samples Only)</label>
+            <label class="form-label">Extension Filter (Samples Mode Only)</label>
             <div class="tag-list">
               <label class="tag-item">
                 <input type="checkbox" name="ext" value=".txt" checked>
@@ -156,75 +196,82 @@
           </div>
         </div>
 
-        <!-- Concurrency Mode Toggle -->
-        <div class="form-group" style="margin-top: 16px;">
-          <label class="form-label">Concurrency Mode</label>
-          <div class="toggle-group">
-            <button type="button" class="toggle-btn active" id="btn-mode-parallel" data-mode="parallel">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="6" y1="3" x2="6" y2="21"></line>
-                <line x1="18" y1="3" x2="18" y2="21"></line>
-              </svg>
-              Parallel (Multithreaded)
-            </button>
-            <button type="button" class="toggle-btn" id="btn-mode-sequential" data-mode="sequential">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="12" y1="3" x2="12" y2="21"></line>
-              </svg>
-              Sequential (1 Thread)
-            </button>
+        <!-- Concurrency Controls (for Mode A & Samples) -->
+        <div id="concurrency-controls">
+          <!-- Concurrency Mode Toggle -->
+          <div class="form-group" style="margin-top: 16px;">
+            <label class="form-label">Concurrency Mode</label>
+            <div class="toggle-group">
+              <button type="button" class="toggle-btn active" id="btn-mode-parallel" data-mode="parallel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="6" y1="3" x2="6" y2="21"></line>
+                  <line x1="18" y1="3" x2="18" y2="21"></line>
+                </svg>
+                Parallel (Thread Pool)
+              </button>
+              <button type="button" class="toggle-btn" id="btn-mode-sequential" data-mode="sequential">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="3" x2="12" y2="21"></line>
+                </svg>
+                Sequential (1 Thread)
+              </button>
+            </div>
+          </div>
+
+          <!-- Worker Count Selector with Auto option -->
+          <div class="form-group" id="worker-count-group">
+            <div class="flex-between">
+              <label class="form-label">Worker Threads (C++ Pool)</label>
+              <span class="field-hint" id="auto-cores-hint">Auto = Hardware concurrency</span>
+            </div>
+            <div class="pill-group" id="worker-pills">
+              <button type="button" class="pill-btn" data-workers="auto" id="pill-auto">Auto</button>
+              <button type="button" class="pill-btn" data-workers="1">1</button>
+              <button type="button" class="pill-btn" data-workers="2">2</button>
+              <button type="button" class="pill-btn active" data-workers="4">4</button>
+              <button type="button" class="pill-btn" data-workers="8">8</button>
+            </div>
+            <span class="field-hint">Spawns N worker threads consuming tasks from synchronized SafeQueue</span>
+          </div>
+
+          <!-- Target Signatures (Mode A) -->
+          <div class="form-group" id="signatures-group">
+            <label class="form-label">Educational Test Signatures (Mode A)</label>
+            <div class="checkbox-list">
+              <label class="check-item">
+                <input type="checkbox" name="sig" value="TEST_SIGNATURE_ALPHA" checked>
+                <span class="check-box"></span>
+                <span class="mono">TEST_SIGNATURE_ALPHA</span>
+              </label>
+              <label class="check-item">
+                <input type="checkbox" name="sig" value="TEST_SIGNATURE_BETA" checked>
+                <span class="check-box"></span>
+                <span class="mono">TEST_SIGNATURE_BETA</span>
+              </label>
+              <label class="check-item">
+                <input type="checkbox" name="sig" value="TEST_SIGNATURE_GAMMA" checked>
+                <span class="check-box"></span>
+                <span class="mono">TEST_SIGNATURE_GAMMA</span>
+              </label>
+              <label class="check-item">
+                <input type="checkbox" name="sig" value="TEST_SIGNATURE_DELTA" checked>
+                <span class="check-box"></span>
+                <span class="mono">TEST_SIGNATURE_DELTA</span>
+              </label>
+            </div>
           </div>
         </div>
 
-        <!-- Worker Count Selector -->
-        <div class="form-group" id="worker-count-group">
-          <label class="form-label">Worker Threads (std::thread Pool)</label>
-          <div class="pill-group" id="worker-pills">
-            <button type="button" class="pill-btn" data-workers="1">1</button>
-            <button type="button" class="pill-btn" data-workers="2">2</button>
-            <button type="button" class="pill-btn active" data-workers="4">4</button>
-            <button type="button" class="pill-btn" data-workers="8">8</button>
-          </div>
-          <span class="field-hint">Spawns N native OS worker threads fed by synchronized SafeQueue</span>
-        </div>
-
-        <!-- Target Signatures -->
+        <!-- Max File Size Limit -->
         <div class="form-group">
-          <label class="form-label">Educational Test Signatures</label>
-          <div class="checkbox-list">
-            <label class="check-item">
-              <input type="checkbox" name="sig" value="TEST_SIGNATURE_ALPHA" checked>
-              <span class="check-box"></span>
-              <span class="mono">TEST_SIGNATURE_ALPHA</span>
-            </label>
-            <label class="check-item">
-              <input type="checkbox" name="sig" value="TEST_SIGNATURE_BETA" checked>
-              <span class="check-box"></span>
-              <span class="mono">TEST_SIGNATURE_BETA</span>
-            </label>
-            <label class="check-item">
-              <input type="checkbox" name="sig" value="TEST_SIGNATURE_GAMMA" checked>
-              <span class="check-box"></span>
-              <span class="mono">TEST_SIGNATURE_GAMMA</span>
-            </label>
-            <label class="check-item">
-              <input type="checkbox" name="sig" value="TEST_SIGNATURE_DELTA" checked>
-              <span class="check-box"></span>
-              <span class="mono">TEST_SIGNATURE_DELTA</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Max File Size -->
-        <div class="form-group">
-          <label class="form-label">Max File Size Limit</label>
+          <label class="form-label">Per-File Inspection Limit</label>
           <select id="max-file-size" class="select-input">
             <option value="1048576">1 MB</option>
             <option value="5242880">5 MB</option>
             <option value="10485760">10 MB</option>
             <option value="26214400" selected>25 MB (Maximum Allowed)</option>
           </select>
-          <span class="field-hint">Files exceeding limit are marked SKIPPED by the C++ engine</span>
+          <span class="field-hint">Files exceeding limit are marked SKIPPED by the engine to protect memory</span>
         </div>
 
         <!-- Action Buttons for Upload Mode -->
@@ -233,7 +280,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="5 3 19 12 5 21 5 3"></polygon>
             </svg>
-            Scan Uploaded File
+            <span id="start-scan-btn-label">Start Multithreaded Scan</span>
           </button>
           <button type="button" id="btn-stop-scan" class="btn btn-danger" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -272,7 +319,7 @@
         </div>
       </section>
 
-      <!-- Execution & Results (Right Column) -->
+      <!-- Execution & Results Area (Right Column) -->
       <section class="execution-area">
         <!-- Live Metrics Strip -->
         <div class="metrics-grid">
@@ -285,20 +332,24 @@
             <div class="metric-val cyan" id="metric-throughput">0.0 MB/s</div>
           </div>
           <div class="metric-card">
+            <div class="metric-title">Queue Status</div>
+            <div class="metric-val" id="metric-queue-status">0 / 0</div>
+          </div>
+          <div class="metric-card">
             <div class="metric-title">Data Scanned</div>
             <div class="metric-val" id="metric-bytes">0 B</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Test Detections</div>
+            <div class="metric-title">Detections</div>
             <div class="metric-val amber" id="metric-matches">0</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Clean Status</div>
+            <div class="metric-title">Clean Files</div>
             <div class="metric-val emerald" id="metric-clean">0</div>
           </div>
         </div>
 
-        <!-- Progress Bar -->
+        <!-- Progress Bar Container -->
         <div class="progress-container">
           <div class="progress-info">
             <span class="progress-status" id="scan-state-badge">Status: IDLE</span>
@@ -339,7 +390,7 @@
                 <line x1="16" y1="17" x2="8" y2="17"></line>
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
-              Scan Results & Pattern Match Status
+              Scan Results & Inspection Details
             </h2>
             <div class="table-filters">
               <input type="text" id="result-search" placeholder="Filter files..." class="search-input">
@@ -359,6 +410,7 @@
                   <th>#</th>
                   <th>Worker</th>
                   <th>File Name</th>
+                  <th>Engine</th>
                   <th>Status</th>
                   <th>Inspection Details</th>
                   <th>File Size</th>
@@ -367,7 +419,7 @@
               </thead>
               <tbody id="results-tbody">
                 <tr class="empty-row">
-                  <td colspan="7">No scan executed yet. Select a file and click "Scan Uploaded File".</td>
+                  <td colspan="8">No scan executed yet. Select files and click "Start Multithreaded Scan".</td>
                 </tr>
               </tbody>
             </table>
@@ -375,7 +427,7 @@
 
           <!-- Educational Disclaimer Banner below results -->
           <div class="disclaimer-banner">
-            <strong>Educational Disclaimer:</strong> ThreadShield searches strictly for configured literal test strings (e.g. <code>TEST_SIGNATURE_ALPHA</code>) to demonstrate concurrent stream matching and synchronization. A "CLEAN" status does <strong>NOT</strong> indicate a file is safe or free of real malware, and a "MATCH" does not indicate maliciousness. ThreadShield is an Operating Systems academic simulation, not an antivirus solution. Scanned files are never executed, quarantined, modified, or deleted.
+            <strong>Operating Systems Academic Notice:</strong> In Mode A, ThreadShield searches strictly for configured literal test patterns (e.g. <code>TEST_SIGNATURE_ALPHA</code>) across raw binary streams to demonstrate concurrent queue dispatching, thread synchronization, and Amdahl's Law speedup. In Mode B, Microsoft Defender CLI is executed non-destructively (<code>-DisableRemediation</code>) to show real antivirus verdicts without touching originals. Scanned files are never executed, quarantined, modified, or permanently retained.
           </div>
         </div>
 
@@ -386,7 +438,7 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
               </svg>
-              Benchmark Analysis: Sequential vs Parallel Speedup (Amdahl's Law)
+              Amdahl's Law Speedup Analysis (Sequential vs 2, 4, 8 Threads)
             </h2>
             <span class="badge purple" id="benchmark-status-badge">Completed</span>
           </div>
@@ -414,18 +466,18 @@
         <div class="panel log-panel">
           <details>
             <summary class="panel-title log-summary">
-              <span>C++ Engine JSON Lines Event Stream</span>
+              <span>Engine Event Stream (JSON Lines)</span>
               <span class="mono text-muted" id="log-count">0 events</span>
             </summary>
             <div class="terminal" id="terminal-logs">
-              <div class="log-line text-muted">[C++ Scanning Engine ready. Awaiting scan task...]</div>
+              <div class="log-line text-muted">[ThreadShield Engine Ready. Awaiting scan task...]</div>
             </div>
           </details>
         </div>
       </section>
     </main>
 
-    <!-- Error Modal / Notification Toast -->
+    <!-- Notification Toast -->
     <div id="toast" class="toast hidden"></div>
   </div>
 

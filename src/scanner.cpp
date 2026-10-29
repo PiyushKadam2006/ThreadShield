@@ -70,7 +70,7 @@ struct ScanOptions {
     std::vector<std::string> signatures;
     std::vector<std::string> extensions;
     bool all_extensions = false;
-    uint64_t max_file_size = 10 * 1024 * 1024; // 10MB default
+    uint64_t max_file_size = 10 * 1024 * 1024; // 10MB default (samples default 10MB; up to 25MB configurable via --max-size)
 };
 
 struct ScanTask {
@@ -126,7 +126,7 @@ std::string normalize_path_display(const std::string& p) {
     return res;
 }
 
-// Scans an individual file safely in read-only chunks
+// Scans an individual file safely in read-only chunks with boundary overlap
 FileScanResult scan_single_file(int worker_id, const ScanTask& task, const ScanOptions& options) {
     auto start_time = std::chrono::high_resolution_clock::now();
     FileScanResult result;
@@ -219,17 +219,24 @@ void worker_thread_func(int worker_id,
                         std::atomic<uint64_t>& skipped_count,
                         std::atomic<uint64_t>& error_count,
                         std::atomic<uint64_t>& total_bytes,
+                        std::atomic<uint32_t>& local_worker_tasks,
                         size_t total_tasks) 
 {
     ScanTask task;
+    uint32_t tasks_processed = 0;
+
     while (queue.pop(task)) {
+        tasks_processed++;
+        local_worker_tasks.store(tasks_processed, std::memory_order_relaxed);
+
         // Emit file_start event
         {
             std::ostringstream ss;
             ss << "{\"type\":\"file_start\","
                << "\"worker_id\":" << worker_id << ","
                << "\"file\":\"" << escape_json(normalize_path_display(task.relative_path)) << "\","
-               << "\"file_size\":" << task.file_size
+               << "\"file_size\":" << task.file_size << ","
+               << "\"task_num\":" << tasks_processed
                << "}";
             emit_json_line(ss.str());
         }
@@ -261,6 +268,7 @@ void worker_thread_func(int worker_id,
                << "\"status\":\"" << res.status << "\","
                << "\"bytes_scanned\":" << res.bytes_scanned << ","
                << "\"duration_us\":" << res.duration_us << ","
+               << "\"task_num\":" << tasks_processed << ","
                << "\"message\":\"" << escape_json(res.message) << "\",\"signatures\":[";
             for (size_t i = 0; i < res.matched_signatures.size(); ++i) {
                 if (i > 0) ss << ",";
@@ -284,10 +292,14 @@ void worker_thread_func(int worker_id,
         }
     }
 
-    // Worker idle / stopped
+    // Worker stopped: emit final worker task count
     {
         std::ostringstream ss;
-        ss << "{\"type\":\"worker_stopped\",\"worker_id\":" << worker_id << "}";
+        ss << "{\"type\":\"worker_stopped\","
+           << "\"worker_id\":" << worker_id << ","
+           << "\"tasks_processed\":" << tasks_processed << ","
+           << "\"was_active\":" << (tasks_processed > 0 ? "true" : "false")
+           << "}";
         emit_json_line(ss.str());
     }
 }
@@ -333,7 +345,13 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--mode" && i + 1 < argc) {
             options.mode = argv[++i];
         } else if (arg == "--workers" && i + 1 < argc) {
-            options.worker_count = std::stoi(argv[++i]);
+            std::string w_str = argv[++i];
+            if (w_str == "auto" || w_str == "0") {
+                unsigned int hw = std::thread::hardware_concurrency();
+                options.worker_count = hw > 0 ? static_cast<int>(hw) : 4;
+            } else {
+                options.worker_count = std::stoi(w_str);
+            }
         } else if (arg == "--signatures" && i + 1 < argc) {
             std::vector<std::string> parsed = split_comma(argv[++i]);
             if (!parsed.empty()) options.signatures = parsed;
@@ -357,8 +375,11 @@ int main(int argc, char* argv[]) {
     if (options.mode == "sequential") {
         options.worker_count = 1;
     } else {
-        if (options.worker_count <= 0) options.worker_count = 1;
-        if (options.worker_count > 32) options.worker_count = 32;
+        if (options.worker_count <= 0) {
+            unsigned int hw = std::thread::hardware_concurrency();
+            options.worker_count = hw > 0 ? static_cast<int>(hw) : 4;
+        }
+        if (options.worker_count > 64) options.worker_count = 64;
     }
 
     // Security Verification:
@@ -530,6 +551,12 @@ int main(int argc, char* argv[]) {
     std::atomic<uint64_t> error_count{0};
     std::atomic<uint64_t> total_bytes{0};
 
+    // Track task count per worker to distinguish active vs idle workers
+    std::vector<std::unique_ptr<std::atomic<uint32_t>>> worker_task_counters;
+    for (int i = 0; i < options.worker_count; ++i) {
+        worker_task_counters.push_back(std::make_unique<std::atomic<uint32_t>>(0));
+    }
+
     SafeQueue<ScanTask> task_queue;
 
     auto global_start_time = std::chrono::high_resolution_clock::now();
@@ -548,6 +575,7 @@ int main(int argc, char* argv[]) {
                              std::ref(skipped_count),
                              std::ref(error_count),
                              std::ref(total_bytes),
+                             std::ref(*worker_task_counters[i]),
                              tasks.size());
     }
 
@@ -575,12 +603,23 @@ int main(int argc, char* argv[]) {
     double throughput_mb_s = total_mb / elapsed_sec;
     double files_per_sec = static_cast<double>(scanned_count.load()) / elapsed_sec;
 
+    // Calculate actual active workers vs idle workers
+    int active_workers = 0;
+    for (int i = 0; i < options.worker_count; ++i) {
+        if (worker_task_counters[i]->load() > 0) {
+            active_workers++;
+        }
+    }
+    int idle_workers = options.worker_count - active_workers;
+
     // Emit final summary JSON line
     {
         std::ostringstream ss;
         ss << "{\"type\":\"summary\","
            << "\"mode\":\"" << options.mode << "\","
            << "\"worker_count\":" << options.worker_count << ","
+           << "\"active_workers\":" << active_workers << ","
+           << "\"idle_workers\":" << idle_workers << ","
            << "\"total_files\":" << tasks.size() << ","
            << "\"scanned_files\":" << scanned_count.load() << ","
            << "\"clean_files\":" << clean_count.load() << ","
