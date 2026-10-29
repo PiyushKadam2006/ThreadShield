@@ -1,0 +1,28 @@
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Compiled C++ binaries & objects
+bin/*.exe
+bin/*.o
+bin/*.obj
+bin/*.pdb
+bin/*.ilk
+
+# Large generated test fixtures
+samples/archives/huge_payload.log
+
+# Temporary & system generated files
+.system_generated/
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+
+# Environment variables
+.env
+.env.local
+
+

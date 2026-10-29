@@ -1,0 +1,4 @@
+# Deep configuration test
+environment=isolated
+safe_mode=true
+marker=TEST_SIGNATURE_GAMMA

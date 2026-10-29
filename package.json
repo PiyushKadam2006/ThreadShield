@@ -1,0 +1,26 @@
+{
+  "name": "threadshield",
+  "version": "1.0.0",
+  "description": "ThreadShield — Interactive Multithreaded File Scanner (Operating Systems Lab Project)",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "generate:samples": "node server/sample_generator.js",
+    "build:cpp": "scripts\\build.bat",
+    "test": "node server/test_suite.js"
+  },
+  "keywords": [
+    "multithreading",
+    "operating-systems",
+    "thread-pool",
+    "concurrency",
+    "file-scanner",
+    "cpp17"
+  ],
+  "author": "ThreadShield Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
+

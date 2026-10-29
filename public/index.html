@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThreadShield — Interactive Multithreaded File Scanner</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="shield-logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="header-title">ThreadShield</h1>
+          <p class="header-subtitle">Interactive Multithreaded File Scanner • Operating Systems Lab</p>
+        </div>
+      </div>
+
+      <div class="header-safety-badge">
+        <span class="pulse-indicator safe"></span>
+        <div class="safety-text">
+          <strong>Academic Simulation</strong>
+          <span>Isolated to ./samples/ • Safe Test Signatures • Read-Only</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- System Status Banner -->
+    <div class="system-bar" id="system-bar">
+      <div class="sys-item">
+        <span class="sys-label">C++ Engine:</span>
+        <span class="sys-value" id="engine-status">Checking...</span>
+      </div>
+      <div class="sys-item">
+        <span class="sys-label">Compiler:</span>
+        <span class="sys-value" id="compiler-info">Detecting...</span>
+      </div>
+      <div class="sys-item">
+        <span class="sys-label">Host CPU Cores:</span>
+        <span class="sys-value" id="cpu-cores">-</span>
+      </div>
+      <div class="sys-item">
+        <span class="sys-label">Target Root:</span>
+        <span class="sys-value mono" id="samples-root">samples/</span>
+      </div>
+    </div>
+
+    <!-- Main Grid -->
+    <main class="main-grid">
+      <!-- Control Panel (Left Column) -->
+      <section class="panel controls-panel">
+        <h2 class="panel-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Scan Configuration
+        </h2>
+
+        <!-- Scan Mode Toggle -->
+        <div class="form-group">
+          <label class="form-label">Concurrency Mode</label>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn active" id="btn-mode-parallel" data-mode="parallel">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="6" y1="3" x2="6" y2="21"></line>
+                <line x1="18" y1="3" x2="18" y2="21"></line>
+              </svg>
+              Parallel (Multithreaded)
+            </button>
+            <button type="button" class="toggle-btn" id="btn-mode-sequential" data-mode="sequential">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="3" x2="12" y2="21"></line>
+              </svg>
+              Sequential (1 Thread)
+            </button>
+          </div>
+        </div>
+
+        <!-- Worker Count Selector -->
+        <div class="form-group" id="worker-count-group">
+          <label class="form-label">Worker Threads (std::thread Pool)</label>
+          <div class="pill-group" id="worker-pills">
+            <button type="button" class="pill-btn" data-workers="1">1</button>
+            <button type="button" class="pill-btn" data-workers="2">2</button>
+            <button type="button" class="pill-btn active" data-workers="4">4</button>
+            <button type="button" class="pill-btn" data-workers="8">8</button>
+          </div>
+          <span class="field-hint">Spawns N worker threads fed by synchronized SafeQueue</span>
+        </div>
+
+        <!-- Target Signatures -->
+        <div class="form-group">
+          <label class="form-label">Educational Signatures</label>
+          <div class="checkbox-list">
+            <label class="check-item">
+              <input type="checkbox" name="sig" value="TEST_SIGNATURE_ALPHA" checked>
+              <span class="check-box"></span>
+              <span class="mono">TEST_SIGNATURE_ALPHA</span>
+            </label>
+            <label class="check-item">
+              <input type="checkbox" name="sig" value="TEST_SIGNATURE_BETA" checked>
+              <span class="check-box"></span>
+              <span class="mono">TEST_SIGNATURE_BETA</span>
+            </label>
+            <label class="check-item">
+              <input type="checkbox" name="sig" value="TEST_SIGNATURE_GAMMA" checked>
+              <span class="check-box"></span>
+              <span class="mono">TEST_SIGNATURE_GAMMA</span>
+            </label>
+            <label class="check-item">
+              <input type="checkbox" name="sig" value="TEST_SIGNATURE_DELTA" checked>
+              <span class="check-box"></span>
+              <span class="mono">TEST_SIGNATURE_DELTA</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- File Extensions -->
+        <div class="form-group">
+          <label class="form-label">File Extension Filter</label>
+          <div class="tag-list">
+            <label class="tag-item">
+              <input type="checkbox" name="ext" value=".txt" checked>
+              <span>.txt</span>
+            </label>
+            <label class="tag-item">
+              <input type="checkbox" name="ext" value=".log" checked>
+              <span>.log</span>
+            </label>
+            <label class="tag-item">
+              <input type="checkbox" name="ext" value=".csv" checked>
+              <span>.csv</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Max File Size -->
+        <div class="form-group">
+          <label class="form-label">Max File Size Limit</label>
+          <select id="max-file-size" class="select-input">
+            <option value="1048576">1 MB</option>
+            <option value="5242880">5 MB</option>
+            <option value="10485760" selected>10 MB</option>
+            <option value="20971520">20 MB</option>
+          </select>
+          <span class="field-hint">Files exceeding limit are marked SKIPPED</span>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="actions-group">
+          <button type="button" id="btn-start-scan" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            Start Scan
+          </button>
+          <button type="button" id="btn-stop-scan" class="btn btn-danger" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            </svg>
+            Stop
+          </button>
+        </div>
+
+        <div class="actions-group-secondary">
+          <button type="button" id="btn-run-benchmark" class="btn btn-benchmark">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 20V10"></path>
+              <path d="M12 20V4"></path>
+              <path d="M6 20v-6"></path>
+            </svg>
+            Run Speedup Benchmark
+          </button>
+          <button type="button" id="btn-generate-samples" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+            </svg>
+            Regenerate Samples
+          </button>
+        </div>
+
+        <div class="dataset-meta" id="dataset-meta">
+          <span>Samples Dataset: <strong id="dataset-files-count">0</strong> files (<strong id="dataset-bytes-size">0 KB</strong>)</span>
+        </div>
+      </section>
+
+      <!-- Execution & Results (Right Column) -->
+      <section class="execution-area">
+        <!-- Live Metrics Strip -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-title">Elapsed Time</div>
+            <div class="metric-val" id="metric-time">0.0 ms</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Throughput</div>
+            <div class="metric-val cyan" id="metric-throughput">0.0 MB/s</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Scan Rate</div>
+            <div class="metric-val" id="metric-rate">0 files/s</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Test Detections</div>
+            <div class="metric-val amber" id="metric-matches">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-title">Clean Files</div>
+            <div class="metric-val emerald" id="metric-clean">0</div>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-container">
+          <div class="progress-info">
+            <span class="progress-status" id="scan-state-badge">Status: IDLE</span>
+            <span class="progress-ratio" id="progress-text">0 / 0 files (0%)</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- Worker Thread Cards -->
+        <div class="panel">
+          <div class="panel-header-inline">
+            <h2 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                <line x1="6" y1="18" x2="6.01" y2="18"></line>
+              </svg>
+              Worker Thread Pool State
+            </h2>
+            <span class="badge" id="active-worker-badge">4 Workers Configured</span>
+          </div>
+          <div class="worker-grid" id="worker-grid">
+            <!-- Dynamically populated worker cards -->
+          </div>
+        </div>
+
+        <!-- Benchmark Comparison Section -->
+        <div class="panel" id="benchmark-panel" style="display: none;">
+          <div class="panel-header-inline">
+            <h2 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+              Benchmark Analysis: Sequential vs Parallel Speedup
+            </h2>
+            <span class="badge purple" id="benchmark-status-badge">Completed</span>
+          </div>
+          
+          <div class="table-responsive">
+            <table class="data-table" id="benchmark-table">
+              <thead>
+                <tr>
+                  <th>Configuration</th>
+                  <th>Workers</th>
+                  <th>Elapsed Time</th>
+                  <th>Throughput</th>
+                  <th>Speedup Factor (S)</th>
+                  <th>Efficiency (E)</th>
+                  <th>Scaling Graph</th>
+                </tr>
+              </thead>
+              <tbody id="benchmark-table-body">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Results Table -->
+        <div class="panel results-panel">
+          <div class="panel-header-inline">
+            <h2 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              File Scan Results
+            </h2>
+            <div class="table-filters">
+              <input type="text" id="result-search" placeholder="Filter files..." class="search-input">
+              <select id="result-filter" class="select-input-sm">
+                <option value="ALL">All Statuses</option>
+                <option value="MATCH">Detections Only</option>
+                <option value="CLEAN">Clean Only</option>
+                <option value="SKIPPED">Skipped</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Worker</th>
+                  <th>Relative File Path</th>
+                  <th>Status</th>
+                  <th>Detection Details</th>
+                  <th>File Size</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody id="results-tbody">
+                <tr class="empty-row">
+                  <td colspan="7">No scan executed yet. Click "Start Scan" to initiate.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Live JSON Lines Stream Log -->
+        <div class="panel log-panel">
+          <details>
+            <summary class="panel-title log-summary">
+              <span>Engine Event Stream (JSON Lines)</span>
+              <span class="mono text-muted" id="log-count">0 events</span>
+            </summary>
+            <div class="terminal" id="terminal-logs">
+              <div class="log-line text-muted">[System ready. Awaiting scan command...]</div>
+            </div>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <!-- Error Modal / Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
