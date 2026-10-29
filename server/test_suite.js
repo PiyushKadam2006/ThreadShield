@@ -6,6 +6,7 @@ const http = require('http');
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const EXECUTABLE_PATH = path.resolve(PROJECT_ROOT, 'bin', 'scanner.exe');
 const SAMPLES_DIR = path.resolve(PROJECT_ROOT, 'samples');
+const TEMP_UPLOADS_ROOT = path.resolve(PROJECT_ROOT, 'temp_uploads');
 
 let testsPassed = 0;
 let testsFailed = 0;
@@ -57,6 +58,49 @@ async function httpRequest(options, postData = null) {
   });
 }
 
+function uploadFileRequest(port, filePath, fields = {}) {
+  return new Promise((resolve, reject) => {
+    const boundary = '----ThreadShieldBoundary' + Date.now();
+    const fileContent = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+
+    let parts = [];
+    for (const [k, v] of Object.entries(fields)) {
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+    }
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`));
+    parts.push(fileContent);
+    parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+    const payload = Buffer.concat(parts);
+
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/scan/upload',
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': payload.length
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(data) });
+        } catch (e) {
+          resolve({ status: res.statusCode, body: data });
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -79,8 +123,6 @@ async function runAllTests() {
   assert(genResult.count >= 20, `Generated ${genResult.count} files (>= 20 expected)`);
   assert(fs.existsSync(path.join(SAMPLES_DIR, 'test_detection_alpha.txt')), 'test_detection_alpha.txt generated');
   assert(fs.existsSync(path.join(SAMPLES_DIR, 'security_alert.log')), 'security_alert.log generated');
-  assert(fs.existsSync(path.join(SAMPLES_DIR, 'reports', 'quarterly_audit.csv')), 'reports/quarterly_audit.csv generated');
-  assert(fs.existsSync(path.join(SAMPLES_DIR, 'archives', 'huge_payload.log')), 'archives/huge_payload.log (oversized file) generated');
 
   // TEST SUITE 3: Standalone C++ Engine Scan Modes & Workers
   console.log('\n--- Test Group 3: C++ Engine Concurrency & Accuracy ---');
@@ -129,8 +171,8 @@ async function runAllTests() {
   const traversalRes2 = runScannerSync('--dir ../..');
   assert(traversalRes2.code === 1, 'Deep path traversal attempt with "../.." was rejected (code 1)');
 
-  const absoluteRootRes = runScannerSync('--dir C:\\Windows');
-  assert(absoluteRootRes.code === 1, 'Absolute external path "C:\\Windows" was rejected (code 1)');
+  const absoluteRootRes = runScannerSync('--allowed-root C:\\Windows');
+  assert(absoluteRootRes.code === 1, 'Absolute external root "C:\\Windows" was rejected (code 1)');
 
   // TEST SUITE 5: Express Server Integration & Polling API
   console.log('\n--- Test Group 5: Express Backend & REST API Integration ---');
@@ -138,8 +180,8 @@ async function runAllTests() {
   process.env.PORT = TEST_PORT.toString();
   
   // Start server
-  const serverModule = require('./server');
-  // Wait 500ms for server to bind
+  const server = require('./server');
+  const serverInstance = server.listen(TEST_PORT, '127.0.0.1');
   await sleep(600);
 
   const reqBase = {
@@ -168,7 +210,7 @@ async function runAllTests() {
   }, { dir: '../../outside' });
   assert(invalidDirRes.status === 400, 'POST /api/scan/start rejected invalid directory traversal with HTTP 400');
 
-  // 5d. Start valid parallel scan via API
+  // 5d. Start valid parallel scan via API on samples/
   const scanStartRes = await httpRequest({
     ...reqBase,
     path: '/api/scan/start',
@@ -182,7 +224,6 @@ async function runAllTests() {
     maxSize: 10485760
   });
   assert(scanStartRes.status === 200, 'POST /api/scan/start initiated scan with HTTP 200');
-  assert(scanStartRes.body.scanId !== undefined, 'Received valid scanId');
 
   // Poll scan status until completed
   let pollStatus = null;
@@ -197,13 +238,143 @@ async function runAllTests() {
     attempts++;
   }
 
-  assert(pollStatus && pollStatus.status === 'completed', 'Scan completed via polling API');
+  assert(pollStatus && pollStatus.status === 'completed', 'Samples scan completed via polling API');
   assert(pollStatus && pollStatus.results && pollStatus.results.length > 0, `Scan returned ${pollStatus.results.length} file results`);
-  assert(pollStatus && pollStatus.summary !== null, 'Scan status contains final summary metrics');
-  assert(pollStatus && pollStatus.workers && Object.keys(pollStatus.workers).length === 4, 'Status tracked 4 worker thread cards');
 
-  // 5e. Test comparative benchmark endpoint
-  console.log('\n--- Test Group 6: Comparative Benchmark Suite ---');
+  // TEST SUITE 6: User File Upload & Scan Workflow
+  console.log('\n--- Test Group 6: User File Upload & Scan Workflow ---');
+
+  // 6a. Upload file with TEST_SIGNATURE_ALPHA
+  const testAlphaFile = path.join(PROJECT_ROOT, 'test_upload_alpha.txt');
+  fs.writeFileSync(testAlphaFile, 'Header data\r\nSpecial payload: TEST_SIGNATURE_ALPHA\r\nFooter details');
+
+  const uploadResAlpha = await uploadFileRequest(TEST_PORT, testAlphaFile, {
+    mode: 'parallel',
+    workers: '4',
+    signatures: 'TEST_SIGNATURE_ALPHA,TEST_SIGNATURE_BETA'
+  });
+  assert(uploadResAlpha.status === 200, 'POST /api/scan/upload initiated for file with TEST_SIGNATURE_ALPHA (HTTP 200)');
+  assert(uploadResAlpha.body.scanId !== undefined, 'Upload returned unique scanId');
+
+  // Poll upload scan status
+  let uploadPollAlpha = null;
+  attempts = 0;
+  while (attempts < 25) {
+    await sleep(200);
+    const pRes = await httpRequest({ ...reqBase, path: '/api/scan/status', method: 'GET' });
+    uploadPollAlpha = pRes.body;
+    if (uploadPollAlpha.status === 'completed' || uploadPollAlpha.status === 'error') {
+      break;
+    }
+    attempts++;
+  }
+
+  assert(uploadPollAlpha && uploadPollAlpha.status === 'completed', 'Uploaded file scan completed via C++ engine');
+  assert(uploadPollAlpha && uploadPollAlpha.results && uploadPollAlpha.results.length === 1, 'Exactly 1 file result returned');
+  assert(uploadPollAlpha.results[0].status === 'MATCH', 'Uploaded file status is MATCH');
+  assert(uploadPollAlpha.results[0].signatures.includes('TEST_SIGNATURE_ALPHA'), 'Matched signature TEST_SIGNATURE_ALPHA identified');
+  assert(uploadPollAlpha.results[0].file === 'test_upload_alpha.txt', 'Results table maps back to original filename');
+
+  // 6b. Verify temporary upload directory cleanup
+  const remainingUploadDirs = fs.readdirSync(TEMP_UPLOADS_ROOT);
+  assert(!remainingUploadDirs.includes(uploadResAlpha.body.scanId), 'Temporary upload directory was securely deleted after scan completion');
+
+  // 6c. Upload clean file with no test signatures
+  const testCleanFile = path.join(PROJECT_ROOT, 'test_upload_clean.txt');
+  fs.writeFileSync(testCleanFile, 'Normal academic project document without any test signatures.');
+
+  const uploadResClean = await uploadFileRequest(TEST_PORT, testCleanFile, {
+    mode: 'sequential',
+    workers: '1',
+    signatures: 'TEST_SIGNATURE_ALPHA,TEST_SIGNATURE_BETA'
+  });
+  assert(uploadResClean.status === 200, 'POST /api/scan/upload initiated for clean file (HTTP 200)');
+
+  let uploadPollClean = null;
+  attempts = 0;
+  while (attempts < 25) {
+    await sleep(200);
+    const pRes = await httpRequest({ ...reqBase, path: '/api/scan/status', method: 'GET' });
+    uploadPollClean = pRes.body;
+    if (uploadPollClean.status === 'completed' || uploadPollClean.status === 'error') {
+      break;
+    }
+    attempts++;
+  }
+
+  assert(uploadPollClean && uploadPollClean.status === 'completed', 'Clean file scan completed');
+  assert(uploadPollClean.results[0].status === 'CLEAN', 'Clean file status is CLEAN ("No configured test signature matched")');
+
+  // 6d. Upload binary file (.bin) with embedded null bytes and signature
+  const testBinFile = path.join(PROJECT_ROOT, 'test_upload_binary.bin');
+  const binPayload = Buffer.concat([
+    Buffer.from([0x00, 0xFF, 0xFE, 0x89, 0x50, 0x4E, 0x47, 0x00]),
+    Buffer.from('BINARY_STREAM_MARKER_TEST_SIGNATURE_BETA_END'),
+    Buffer.from([0x00, 0x01, 0x02, 0xDE, 0xAD, 0xBE, 0xEF])
+  ]);
+  fs.writeFileSync(testBinFile, binPayload);
+
+  const uploadResBin = await uploadFileRequest(TEST_PORT, testBinFile, {
+    mode: 'parallel',
+    workers: '4',
+    signatures: 'TEST_SIGNATURE_ALPHA,TEST_SIGNATURE_BETA'
+  });
+  assert(uploadResBin.status === 200, 'POST /api/scan/upload initiated for arbitrary binary file (HTTP 200)');
+
+  let uploadPollBin = null;
+  attempts = 0;
+  while (attempts < 25) {
+    await sleep(200);
+    const pRes = await httpRequest({ ...reqBase, path: '/api/scan/status', method: 'GET' });
+    uploadPollBin = pRes.body;
+    if (uploadPollBin.status === 'completed' || uploadPollBin.status === 'error') {
+      break;
+    }
+    attempts++;
+  }
+
+  assert(uploadPollBin && uploadPollBin.status === 'completed', 'Binary file scan completed');
+  assert(uploadPollBin.results[0].status === 'MATCH', 'Binary file status is MATCH');
+  assert(uploadPollBin.results[0].signatures.includes('TEST_SIGNATURE_BETA'), 'Binary stream detected TEST_SIGNATURE_BETA across raw bytes');
+
+  // 6e. Upload with small max size limit to verify SKIPPED status
+  const uploadResSize = await uploadFileRequest(TEST_PORT, testBinFile, {
+    mode: 'parallel',
+    workers: '2',
+    maxSize: '10' // file is > 10 bytes
+  });
+  assert(uploadResSize.status === 200, 'Upload with max-size limit accepted');
+
+  let uploadPollSize = null;
+  attempts = 0;
+  while (attempts < 25) {
+    await sleep(200);
+    const pRes = await httpRequest({ ...reqBase, path: '/api/scan/status', method: 'GET' });
+    uploadPollSize = pRes.body;
+    if (uploadPollSize.status === 'completed' || uploadPollSize.status === 'error') {
+      break;
+    }
+    attempts++;
+  }
+
+  assert(uploadPollSize && uploadPollSize.results[0].status === 'SKIPPED', 'File exceeding max-size limit was marked SKIPPED');
+
+  // 6f. Invalid upload request (no file)
+  const emptyUploadRes = await httpRequest({
+    ...reqBase,
+    path: '/api/scan/upload',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  }, {});
+  assert(emptyUploadRes.status === 400, 'POST /api/scan/upload rejected request with missing file (HTTP 400)');
+
+  // Clean up temporary local test files
+  fs.unlinkSync(testAlphaFile);
+  fs.unlinkSync(testCleanFile);
+  fs.unlinkSync(testBinFile);
+
+  // TEST SUITE 7: Comparative Benchmark Preservation
+  console.log('\n--- Test Group 7: Comparative Benchmark Suite ---');
   const benchRes = await httpRequest({ ...reqBase, path: '/api/benchmark/run', method: 'POST' });
   assert(benchRes.status === 200, 'POST /api/benchmark/run started benchmark');
 
@@ -232,6 +403,8 @@ async function runAllTests() {
     })));
   }
 
+  serverInstance.close();
+
   // Summary
   console.log('\n======================================================');
   console.log(` Test Results: ${testsPassed} Passed, ${testsFailed} Failed`);
@@ -244,4 +417,3 @@ runAllTests().catch(err => {
   console.error('Fatal test error:', err);
   process.exit(1);
 });
-

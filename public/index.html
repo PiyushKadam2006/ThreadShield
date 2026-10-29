@@ -29,8 +29,8 @@
       <div class="header-safety-badge">
         <span class="pulse-indicator safe"></span>
         <div class="safety-text">
-          <strong>Academic Simulation</strong>
-          <span>Isolated to ./samples/ • Safe Test Signatures • Read-Only</span>
+          <strong>Educational Scanner Only</strong>
+          <span>Pattern Matching Simulation • 127.0.0.1 • Read-Only • No Quarantine/Delete</span>
         </div>
       </div>
     </header>
@@ -50,8 +50,8 @@
         <span class="sys-value" id="cpu-cores">-</span>
       </div>
       <div class="sys-item">
-        <span class="sys-label">Target Root:</span>
-        <span class="sys-value mono" id="samples-root">samples/</span>
+        <span class="sys-label">Server Binding:</span>
+        <span class="sys-value mono">127.0.0.1</span>
       </div>
     </div>
 
@@ -59,16 +59,105 @@
     <main class="main-grid">
       <!-- Control Panel (Left Column) -->
       <section class="panel controls-panel">
-        <h2 class="panel-title">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-          Scan Configuration
-        </h2>
+        <!-- Target Source Tabs -->
+        <div class="source-tabs">
+          <button type="button" class="tab-btn active" id="tab-btn-upload">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            Scan Your Own File
+          </button>
+          <button type="button" class="tab-btn" id="tab-btn-samples">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            Samples Benchmark
+          </button>
+        </div>
 
-        <!-- Scan Mode Toggle -->
-        <div class="form-group">
+        <!-- TAB 1: User File Upload Section -->
+        <div id="section-upload" class="tab-content active">
+          <!-- Architecture Note explaining browser sandboxing & localhost upload -->
+          <div class="info-box">
+            <div class="info-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              Browser Sandbox & Localhost Upload Notice
+            </div>
+            <p>Web browsers prevent websites from directly accessing arbitrary local filesystem paths. Selecting a file transmits a local copy directly to the ThreadShield server at <code>127.0.0.1</code> into a temporary directory for C++ engine multithreaded scanning. The temporary copy is <strong>automatically deleted immediately</strong> after scanning.</p>
+          </div>
+
+          <!-- File Picker Dropzone -->
+          <div class="form-group">
+            <label class="form-label">Select File to Scan (Any Format, max 25 MB)</label>
+            <div class="file-dropzone" id="file-dropzone">
+              <input type="file" id="user-file-input" class="file-input-hidden">
+              <div class="dropzone-prompt" id="dropzone-prompt">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <div class="dropzone-text">
+                  <strong>Click to choose a file</strong> or drag and drop here
+                </div>
+                <div class="dropzone-hint">Supports text, logs, code, binaries, zip, pdf, exe (up to 25 MB)</div>
+              </div>
+
+              <!-- Selected File Card (hidden by default) -->
+              <div class="selected-file-card hidden" id="selected-file-card">
+                <div class="selected-file-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                    <polyline points="13 2 13 9 20 9"></polyline>
+                  </svg>
+                </div>
+                <div class="selected-file-details">
+                  <div class="selected-file-name mono" id="selected-file-name">filename.ext</div>
+                  <div class="selected-file-meta">
+                    <span id="selected-file-size">0 KB</span> • <span id="selected-file-type">text/plain</span>
+                  </div>
+                </div>
+                <button type="button" class="btn-clear-file" id="btn-clear-file" title="Remove selection">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Samples Dataset Section (Alternative mode) -->
+        <div id="section-samples" class="tab-content">
+          <div class="dataset-card">
+            <div class="dataset-meta">
+              <span>Samples Directory: <strong id="dataset-files-count">0</strong> files (<strong id="dataset-bytes-size">0 KB</strong>)</span>
+            </div>
+            <p class="field-hint" style="margin-top: 6px;">Batch scan preloaded test files across subdirectories to measure concurrent throughput and speedup.</p>
+          </div>
+          <div class="form-group" style="margin-top: 12px;">
+            <label class="form-label">Extension Filter (Samples Only)</label>
+            <div class="tag-list">
+              <label class="tag-item">
+                <input type="checkbox" name="ext" value=".txt" checked>
+                <span>.txt</span>
+              </label>
+              <label class="tag-item">
+                <input type="checkbox" name="ext" value=".log" checked>
+                <span>.log</span>
+              </label>
+              <label class="tag-item">
+                <input type="checkbox" name="ext" value=".csv" checked>
+                <span>.csv</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Concurrency Mode Toggle -->
+        <div class="form-group" style="margin-top: 16px;">
           <label class="form-label">Concurrency Mode</label>
           <div class="toggle-group">
             <button type="button" class="toggle-btn active" id="btn-mode-parallel" data-mode="parallel">
@@ -96,12 +185,12 @@
             <button type="button" class="pill-btn active" data-workers="4">4</button>
             <button type="button" class="pill-btn" data-workers="8">8</button>
           </div>
-          <span class="field-hint">Spawns N worker threads fed by synchronized SafeQueue</span>
+          <span class="field-hint">Spawns N native OS worker threads fed by synchronized SafeQueue</span>
         </div>
 
         <!-- Target Signatures -->
         <div class="form-group">
-          <label class="form-label">Educational Signatures</label>
+          <label class="form-label">Educational Test Signatures</label>
           <div class="checkbox-list">
             <label class="check-item">
               <input type="checkbox" name="sig" value="TEST_SIGNATURE_ALPHA" checked>
@@ -126,44 +215,25 @@
           </div>
         </div>
 
-        <!-- File Extensions -->
-        <div class="form-group">
-          <label class="form-label">File Extension Filter</label>
-          <div class="tag-list">
-            <label class="tag-item">
-              <input type="checkbox" name="ext" value=".txt" checked>
-              <span>.txt</span>
-            </label>
-            <label class="tag-item">
-              <input type="checkbox" name="ext" value=".log" checked>
-              <span>.log</span>
-            </label>
-            <label class="tag-item">
-              <input type="checkbox" name="ext" value=".csv" checked>
-              <span>.csv</span>
-            </label>
-          </div>
-        </div>
-
         <!-- Max File Size -->
         <div class="form-group">
           <label class="form-label">Max File Size Limit</label>
           <select id="max-file-size" class="select-input">
             <option value="1048576">1 MB</option>
             <option value="5242880">5 MB</option>
-            <option value="10485760" selected>10 MB</option>
-            <option value="20971520">20 MB</option>
+            <option value="10485760">10 MB</option>
+            <option value="26214400" selected>25 MB (Maximum Allowed)</option>
           </select>
-          <span class="field-hint">Files exceeding limit are marked SKIPPED</span>
+          <span class="field-hint">Files exceeding limit are marked SKIPPED by the C++ engine</span>
         </div>
 
-        <!-- Action Buttons -->
-        <div class="actions-group">
-          <button type="button" id="btn-start-scan" class="btn btn-primary">
+        <!-- Action Buttons for Upload Mode -->
+        <div id="upload-actions" class="actions-group">
+          <button type="button" id="btn-start-upload-scan" class="btn btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="5 3 19 12 5 21 5 3"></polygon>
             </svg>
-            Start Scan
+            Scan Uploaded File
           </button>
           <button type="button" id="btn-stop-scan" class="btn btn-danger" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -173,25 +243,32 @@
           </button>
         </div>
 
-        <div class="actions-group-secondary">
-          <button type="button" id="btn-run-benchmark" class="btn btn-benchmark">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 20V10"></path>
-              <path d="M12 20V4"></path>
-              <path d="M6 20v-6"></path>
-            </svg>
-            Run Speedup Benchmark
-          </button>
-          <button type="button" id="btn-generate-samples" class="btn btn-secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
-            </svg>
-            Regenerate Samples
-          </button>
-        </div>
-
-        <div class="dataset-meta" id="dataset-meta">
-          <span>Samples Dataset: <strong id="dataset-files-count">0</strong> files (<strong id="dataset-bytes-size">0 KB</strong>)</span>
+        <!-- Action Buttons for Samples Mode -->
+        <div id="samples-actions" class="hidden">
+          <div class="actions-group">
+            <button type="button" id="btn-start-samples-scan" class="btn btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              Scan Samples Directory
+            </button>
+          </div>
+          <div class="actions-group-secondary" style="margin-top: 10px;">
+            <button type="button" id="btn-run-benchmark" class="btn btn-benchmark">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 20V10"></path>
+                <path d="M12 20V4"></path>
+                <path d="M6 20v-6"></path>
+              </svg>
+              Run Speedup Benchmark (1, 2, 4, 8)
+            </button>
+            <button type="button" id="btn-generate-samples" class="btn btn-secondary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+              </svg>
+              Regenerate Samples
+            </button>
+          </div>
         </div>
       </section>
 
@@ -208,15 +285,15 @@
             <div class="metric-val cyan" id="metric-throughput">0.0 MB/s</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Scan Rate</div>
-            <div class="metric-val" id="metric-rate">0 files/s</div>
+            <div class="metric-title">Data Scanned</div>
+            <div class="metric-val" id="metric-bytes">0 B</div>
           </div>
           <div class="metric-card">
             <div class="metric-title">Test Detections</div>
             <div class="metric-val amber" id="metric-matches">0</div>
           </div>
           <div class="metric-card">
-            <div class="metric-title">Clean Files</div>
+            <div class="metric-title">Clean Status</div>
             <div class="metric-val emerald" id="metric-clean">0</div>
           </div>
         </div>
@@ -242,7 +319,7 @@
                 <line x1="6" y1="6" x2="6.01" y2="6"></line>
                 <line x1="6" y1="18" x2="6.01" y2="18"></line>
               </svg>
-              Worker Thread Pool State
+              Worker Thread Pool State (C++ std::thread)
             </h2>
             <span class="badge" id="active-worker-badge">4 Workers Configured</span>
           </div>
@@ -251,14 +328,65 @@
           </div>
         </div>
 
-        <!-- Benchmark Comparison Section -->
+        <!-- Results Table -->
+        <div class="panel results-panel">
+          <div class="panel-header-inline">
+            <h2 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              Scan Results & Pattern Match Status
+            </h2>
+            <div class="table-filters">
+              <input type="text" id="result-search" placeholder="Filter files..." class="search-input">
+              <select id="result-filter" class="select-input-sm">
+                <option value="ALL">All Statuses</option>
+                <option value="MATCH">Detections Only</option>
+                <option value="CLEAN">Clean Only</option>
+                <option value="SKIPPED">Skipped</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Worker</th>
+                  <th>File Name</th>
+                  <th>Status</th>
+                  <th>Inspection Details</th>
+                  <th>File Size</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody id="results-tbody">
+                <tr class="empty-row">
+                  <td colspan="7">No scan executed yet. Select a file and click "Scan Uploaded File".</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Educational Disclaimer Banner below results -->
+          <div class="disclaimer-banner">
+            <strong>Educational Disclaimer:</strong> ThreadShield searches strictly for configured literal test strings (e.g. <code>TEST_SIGNATURE_ALPHA</code>) to demonstrate concurrent stream matching and synchronization. A "CLEAN" status does <strong>NOT</strong> indicate a file is safe or free of real malware, and a "MATCH" does not indicate maliciousness. ThreadShield is an Operating Systems academic simulation, not an antivirus solution. Scanned files are never executed, quarantined, modified, or deleted.
+          </div>
+        </div>
+
+        <!-- Benchmark Comparison Section (for Samples Benchmark) -->
         <div class="panel" id="benchmark-panel" style="display: none;">
           <div class="panel-header-inline">
             <h2 class="panel-title">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
               </svg>
-              Benchmark Analysis: Sequential vs Parallel Speedup
+              Benchmark Analysis: Sequential vs Parallel Speedup (Amdahl's Law)
             </h2>
             <span class="badge purple" id="benchmark-status-badge">Completed</span>
           </div>
@@ -282,61 +410,15 @@
           </div>
         </div>
 
-        <!-- Results Table -->
-        <div class="panel results-panel">
-          <div class="panel-header-inline">
-            <h2 class="panel-title">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-                <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-              File Scan Results
-            </h2>
-            <div class="table-filters">
-              <input type="text" id="result-search" placeholder="Filter files..." class="search-input">
-              <select id="result-filter" class="select-input-sm">
-                <option value="ALL">All Statuses</option>
-                <option value="MATCH">Detections Only</option>
-                <option value="CLEAN">Clean Only</option>
-                <option value="SKIPPED">Skipped</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="table-responsive">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Worker</th>
-                  <th>Relative File Path</th>
-                  <th>Status</th>
-                  <th>Detection Details</th>
-                  <th>File Size</th>
-                  <th>Duration</th>
-                </tr>
-              </thead>
-              <tbody id="results-tbody">
-                <tr class="empty-row">
-                  <td colspan="7">No scan executed yet. Click "Start Scan" to initiate.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         <!-- Live JSON Lines Stream Log -->
         <div class="panel log-panel">
           <details>
             <summary class="panel-title log-summary">
-              <span>Engine Event Stream (JSON Lines)</span>
+              <span>C++ Engine JSON Lines Event Stream</span>
               <span class="mono text-muted" id="log-count">0 events</span>
             </summary>
             <div class="terminal" id="terminal-logs">
-              <div class="log-line text-muted">[System ready. Awaiting scan command...]</div>
+              <div class="log-line text-muted">[C++ Scanning Engine ready. Awaiting scan task...]</div>
             </div>
           </details>
         </div>
@@ -350,4 +432,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-

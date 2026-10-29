@@ -2,11 +2,13 @@
 document.addEventListener('DOMContentLoaded', () => {
   // Application State
   const state = {
+    activeTab: 'upload', // 'upload' or 'samples'
+    selectedFile: null,
     mode: 'parallel',
     workers: 4,
     signatures: ['TEST_SIGNATURE_ALPHA', 'TEST_SIGNATURE_BETA', 'TEST_SIGNATURE_GAMMA', 'TEST_SIGNATURE_DELTA'],
     extensions: ['.txt', '.log', '.csv'],
-    maxSize: 10485760,
+    maxSize: 26214400, // 25 MB
     pollInterval: null,
     benchmarkPollInterval: null,
     allResults: [],
@@ -18,9 +20,24 @@ document.addEventListener('DOMContentLoaded', () => {
     engineStatus: document.getElementById('engine-status'),
     compilerInfo: document.getElementById('compiler-info'),
     cpuCores: document.getElementById('cpu-cores'),
-    samplesRoot: document.getElementById('samples-root'),
     datasetFilesCount: document.getElementById('dataset-files-count'),
     datasetBytesSize: document.getElementById('dataset-bytes-size'),
+
+    tabBtnUpload: document.getElementById('tab-btn-upload'),
+    tabBtnSamples: document.getElementById('tab-btn-samples'),
+    sectionUpload: document.getElementById('section-upload'),
+    sectionSamples: document.getElementById('section-samples'),
+    uploadActions: document.getElementById('upload-actions'),
+    samplesActions: document.getElementById('samples-actions'),
+
+    fileDropzone: document.getElementById('file-dropzone'),
+    userFileInput: document.getElementById('user-file-input'),
+    dropzonePrompt: document.getElementById('dropzone-prompt'),
+    selectedFileCard: document.getElementById('selected-file-card'),
+    selectedFileName: document.getElementById('selected-file-name'),
+    selectedFileSize: document.getElementById('selected-file-size'),
+    selectedFileType: document.getElementById('selected-file-type'),
+    btnClearFile: document.getElementById('btn-clear-file'),
 
     btnModeParallel: document.getElementById('btn-mode-parallel'),
     btnModeSequential: document.getElementById('btn-mode-sequential'),
@@ -28,14 +45,15 @@ document.addEventListener('DOMContentLoaded', () => {
     workerCountGroup: document.getElementById('worker-count-group'),
     maxFileSize: document.getElementById('max-file-size'),
 
-    btnStartScan: document.getElementById('btn-start-scan'),
+    btnStartUploadScan: document.getElementById('btn-start-upload-scan'),
+    btnStartSamplesScan: document.getElementById('btn-start-samples-scan'),
     btnStopScan: document.getElementById('btn-stop-scan'),
     btnRunBenchmark: document.getElementById('btn-run-benchmark'),
     btnGenerateSamples: document.getElementById('btn-generate-samples'),
 
     metricTime: document.getElementById('metric-time'),
     metricThroughput: document.getElementById('metric-throughput'),
-    metricRate: document.getElementById('metric-rate'),
+    metricBytes: document.getElementById('metric-bytes'),
     metricMatches: document.getElementById('metric-matches'),
     metricClean: document.getElementById('metric-clean'),
 
@@ -59,19 +77,19 @@ document.addEventListener('DOMContentLoaded', () => {
     toast: document.getElementById('toast')
   };
 
-  // Show Toast Notification
+  // Toast Notification
   function showToast(message, isError = false) {
     el.toast.textContent = message;
     el.toast.style.borderColor = isError ? 'var(--coral)' : 'var(--cyan)';
     el.toast.classList.remove('hidden');
     setTimeout(() => {
       el.toast.classList.add('hidden');
-    }, 4000);
+    }, 4500);
   }
 
   // Format Bytes Utility
   function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
+    if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -86,14 +104,14 @@ document.addEventListener('DOMContentLoaded', () => {
       state.system = data;
 
       el.cpuCores.textContent = `${data.cpus} Logical Cores (${data.cpuModel})`;
-      if (data.compiler.detected) {
+      if (data.compiler && data.compiler.detected) {
         el.compilerInfo.textContent = `${data.compiler.type} (${data.compiler.path})`;
       } else {
         el.compilerInfo.textContent = 'None detected';
         el.compilerInfo.classList.add('missing');
       }
 
-      if (data.executable.compiled) {
+      if (data.executable && data.executable.compiled) {
         el.engineStatus.textContent = 'Engine Ready (scanner.exe)';
         el.engineStatus.classList.add('ready');
       } else {
@@ -109,10 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await fetch('/api/samples/info');
       const data = await res.json();
-      if (!data.exists || data.totalFiles === 0) {
-        // Auto-generate test samples if directory is empty
-        await generateSamplesDataset();
-      } else {
+      if (data.exists) {
         el.datasetFilesCount.textContent = data.totalFiles;
         el.datasetBytesSize.textContent = formatBytes(data.totalBytes);
       }
@@ -138,11 +153,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Render Worker Cards
+  // Tab Switching
+  function switchTab(targetTab) {
+    state.activeTab = targetTab;
+    if (targetTab === 'upload') {
+      el.tabBtnUpload.classList.add('active');
+      el.tabBtnSamples.classList.remove('active');
+      el.sectionUpload.classList.add('active');
+      el.sectionSamples.classList.remove('active');
+      el.uploadActions.classList.remove('hidden');
+      el.samplesActions.classList.add('hidden');
+    } else {
+      el.tabBtnSamples.classList.add('active');
+      el.tabBtnUpload.classList.remove('active');
+      el.sectionSamples.classList.add('active');
+      el.sectionUpload.classList.remove('active');
+      el.samplesActions.classList.remove('hidden');
+      el.uploadActions.classList.add('hidden');
+      loadSamplesInfo();
+    }
+  }
+
+  // File Selection Handling
+  function handleFileSelection(file) {
+    if (!file) return;
+
+    const MAX_ALLOWED = 25 * 1024 * 1024; // 25 MB
+    if (file.size > MAX_ALLOWED) {
+      showToast(`Selected file exceeds the 25 MB limit (${formatBytes(file.size)}).`, true);
+      clearFileSelection();
+      return;
+    }
+
+    state.selectedFile = file;
+    el.selectedFileName.textContent = file.name;
+    el.selectedFileSize.textContent = formatBytes(file.size);
+    el.selectedFileType.textContent = file.type || 'Binary / Custom format';
+
+    el.dropzonePrompt.classList.add('hidden');
+    el.selectedFileCard.classList.remove('hidden');
+    showToast(`File selected: ${file.name} (${formatBytes(file.size)})`);
+  }
+
+  function clearFileSelection() {
+    state.selectedFile = null;
+    el.userFileInput.value = '';
+    el.selectedFileCard.classList.add('hidden');
+    el.dropzonePrompt.classList.remove('hidden');
+  }
+
+  // Worker Cards UI
   function initWorkerCards(workerCount) {
     el.workerGrid.innerHTML = '';
     el.activeWorkerBadge.textContent = `${workerCount} Worker Thread${workerCount > 1 ? 's' : ''} Configured`;
-    
+
     for (let i = 1; i <= workerCount; i++) {
       const card = document.createElement('div');
       card.className = 'worker-card';
@@ -159,7 +223,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Update Worker Card
   function updateWorkerCard(id, file, status, count) {
     const card = document.getElementById(`worker-card-${id}`);
     const dot = document.getElementById(`worker-dot-${id}`);
@@ -183,11 +246,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (countLabel && count !== undefined) {
-      countLabel.textContent = `${count} file${count === 1 ? '' : 's'} scanned`;
+      countLabel.textContent = `${count} task${count === 1 ? '' : 's'} processed`;
     }
   }
 
-  // Scan Mode Handler
+  // Mode & Options
   function setMode(mode) {
     state.mode = mode;
     if (mode === 'sequential') {
@@ -202,36 +265,98 @@ document.addEventListener('DOMContentLoaded', () => {
       el.btnModeSequential.classList.remove('active');
       el.workerCountGroup.style.opacity = '1';
       el.workerCountGroup.style.pointerEvents = 'auto';
-      // Read current active pill
       const activePill = el.workerPills.querySelector('.pill-btn.active');
       state.workers = activePill ? Number(activePill.dataset.workers) : 4;
       initWorkerCards(state.workers);
     }
   }
 
-  // Get Selected Signatures
   function getSelectedSignatures() {
     const checked = document.querySelectorAll('input[name="sig"]:checked');
     return Array.from(checked).map(c => c.value);
   }
 
-  // Get Selected Extensions
   function getSelectedExtensions() {
     const checked = document.querySelectorAll('input[name="ext"]:checked');
     return Array.from(checked).map(c => c.value);
   }
 
-  // Start Scan
-  async function startScan() {
+  // Reset UI before scan execution
+  function resetScanUI() {
+    state.allResults = [];
+    el.resultsTbody.innerHTML = '<tr class="empty-row"><td colspan="7">Scanning in progress via C++ multithreaded engine...</td></tr>';
+    el.metricTime.textContent = '0.0 ms';
+    el.metricThroughput.textContent = '0.0 MB/s';
+    el.metricBytes.textContent = '0 B';
+    el.metricMatches.textContent = '0';
+    el.metricClean.textContent = '0';
+    el.progressBarFill.style.width = '0%';
+    el.progressText.textContent = 'Starting C++ engine...';
+    el.scanStateBadge.textContent = 'Status: RUNNING';
+    el.scanStateBadge.className = 'progress-status';
+
+    initWorkerCards(state.workers);
+
+    el.btnStartUploadScan.disabled = true;
+    el.btnStartSamplesScan.disabled = true;
+    el.btnStopScan.disabled = false;
+    el.btnRunBenchmark.disabled = true;
+  }
+
+  // Start User File Upload Scan
+  async function startUploadScan() {
+    if (!state.selectedFile) {
+      showToast('Please select a local file to scan first.', true);
+      return;
+    }
+
+    const sigs = getSelectedSignatures();
+    if (sigs.length === 0) {
+      showToast('Please enable at least one test signature.', true);
+      return;
+    }
+
+    state.signatures = sigs;
+    state.maxSize = Number(el.maxFileSize.value);
+
+    resetScanUI();
+
+    const formData = new FormData();
+    formData.append('file', state.selectedFile);
+    formData.append('mode', state.mode);
+    formData.append('workers', state.workers);
+    formData.append('signatures', state.signatures.join(','));
+    formData.append('maxSize', state.maxSize);
+
+    try {
+      showToast(`Uploading ${state.selectedFile.name} to 127.0.0.1 for C++ scan...`);
+      const res = await fetch('/api/scan/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Failed to start file scan.', true);
+        finishScanUI('error', data.error);
+        return;
+      }
+
+      showToast(`Scan running (${state.mode.toUpperCase()} - ${state.workers} worker${state.workers > 1 ? 's' : ''})`);
+      pollScanStatus();
+    } catch (err) {
+      showToast(`Scan request failed: ${err.message}`, true);
+      finishScanUI('error', err.message);
+    }
+  }
+
+  // Start Samples Directory Scan
+  async function startSamplesScan() {
     const sigs = getSelectedSignatures();
     const exts = getSelectedExtensions();
 
     if (sigs.length === 0) {
-      showToast('Please select at least one test signature.', true);
-      return;
-    }
-    if (exts.length === 0) {
-      showToast('Please select at least one file extension.', true);
+      showToast('Please enable at least one test signature.', true);
       return;
     }
 
@@ -239,24 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.extensions = exts;
     state.maxSize = Number(el.maxFileSize.value);
 
-    // Reset UI state
-    state.allResults = [];
-    el.resultsTbody.innerHTML = '<tr class="empty-row"><td colspan="7">Scanning in progress...</td></tr>';
-    el.metricTime.textContent = '0.0 ms';
-    el.metricThroughput.textContent = '0.0 MB/s';
-    el.metricRate.textContent = '0 files/s';
-    el.metricMatches.textContent = '0';
-    el.metricClean.textContent = '0';
-    el.progressBarFill.style.width = '0%';
-    el.progressText.textContent = 'Initializing...';
-    el.scanStateBadge.textContent = 'Status: RUNNING';
-    el.scanStateBadge.className = 'progress-status';
-
-    initWorkerCards(state.workers);
-
-    el.btnStartScan.disabled = true;
-    el.btnStopScan.disabled = false;
-    el.btnRunBenchmark.disabled = true;
+    resetScanUI();
 
     try {
       const res = await fetch('/api/scan/start', {
@@ -273,20 +381,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || 'Failed to start scanner process.', true);
+        showToast(data.error || 'Failed to start samples scan.', true);
         finishScanUI('error', data.error);
         return;
       }
 
-      showToast(`Scan started (${state.mode.toUpperCase()} - ${state.workers} worker${state.workers > 1 ? 's' : ''})`);
+      showToast(`Samples scan running (${state.mode.toUpperCase()} - ${state.workers} workers)`);
       pollScanStatus();
     } catch (err) {
-      showToast(`Scan trigger error: ${err.message}`, true);
+      showToast(`Scan request failed: ${err.message}`, true);
       finishScanUI('error', err.message);
     }
   }
 
-  // Poll Scan Status
+  // Polling Status Loop
   function pollScanStatus() {
     if (state.pollInterval) clearInterval(state.pollInterval);
 
@@ -298,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update progress
         const pct = (data.progress.percentage || 0).toFixed(1);
         el.progressBarFill.style.width = `${pct}%`;
-        el.progressText.textContent = `${data.progress.scanned_files || 0} / ${data.progress.total_files || 0} files (${pct}%)`;
+        el.progressText.textContent = `${data.progress.scanned_files || 0} / ${data.progress.total_files || 0} (${pct}%)`;
 
         // Update workers
         if (data.workers) {
@@ -321,17 +429,19 @@ document.addEventListener('DOMContentLoaded', () => {
           state.allResults = data.results;
           renderResultsTable();
 
-          // Calculate live counters
           const matches = state.allResults.filter(r => r.status === 'MATCH').length;
           const clean = state.allResults.filter(r => r.status === 'CLEAN').length;
+          const bytes = state.allResults.reduce((acc, r) => acc + (r.bytesScanned || 0), 0);
+
           el.metricMatches.textContent = matches;
           el.metricClean.textContent = clean;
+          el.metricBytes.textContent = formatBytes(bytes);
         }
 
         // Live elapsed time
         el.metricTime.textContent = `${(data.elapsedMs || 0).toFixed(1)} ms`;
 
-        // Check if finished
+        // Check completion
         if (data.status === 'completed' || data.status === 'error' || data.status === 'stopped') {
           clearInterval(state.pollInterval);
           state.pollInterval = null;
@@ -339,11 +449,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (data.summary) {
             el.metricTime.textContent = `${data.summary.elapsed_ms} ms`;
             el.metricThroughput.textContent = `${data.summary.throughput_mb_s} MB/s`;
-            el.metricRate.textContent = `${data.summary.files_per_sec} files/s`;
+            el.metricBytes.textContent = formatBytes(data.summary.total_bytes);
             el.metricMatches.textContent = data.summary.matched_files;
             el.metricClean.textContent = data.summary.clean_files;
             el.progressBarFill.style.width = '100%';
-            el.progressText.textContent = `${data.summary.scanned_files} / ${data.summary.total_files} files (100%)`;
+            el.progressText.textContent = `${data.summary.scanned_files} / ${data.summary.total_files} (100%)`;
           }
 
           finishScanUI(data.status, data.error);
@@ -351,19 +461,19 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e) {
         console.error('Polling error:', e);
       }
-    }, 200);
+    }, 180);
   }
 
-  // Finish Scan UI State
   function finishScanUI(status, errorMsg) {
-    el.btnStartScan.disabled = false;
+    el.btnStartUploadScan.disabled = false;
+    el.btnStartSamplesScan.disabled = false;
     el.btnStopScan.disabled = true;
     el.btnRunBenchmark.disabled = false;
 
     if (status === 'completed') {
       el.scanStateBadge.textContent = 'Status: COMPLETED';
       el.scanStateBadge.className = 'progress-status ready';
-      showToast('Multithreaded scan completed successfully.');
+      showToast('Multithreaded C++ scan completed successfully.');
     } else if (status === 'stopped') {
       el.scanStateBadge.textContent = 'Status: CANCELLED';
       el.scanStateBadge.className = 'progress-status missing';
@@ -405,18 +515,18 @@ document.addEventListener('DOMContentLoaded', () => {
     el.resultsTbody.innerHTML = filtered.map((r, idx) => {
       let statusBadge = '';
       if (r.status === 'MATCH') {
-        statusBadge = `<span class="badge match">MATCH (${r.signatures.length})</span>`;
+        statusBadge = `<span class="badge match">TEST SIGNATURE MATCHED</span>`;
       } else if (r.status === 'CLEAN') {
-        statusBadge = `<span class="badge clean">CLEAN</span>`;
+        statusBadge = `<span class="badge clean">NO TEST SIGNATURE MATCHED</span>`;
       } else if (r.status === 'SKIPPED') {
-        statusBadge = `<span class="badge skipped">SKIPPED</span>`;
+        statusBadge = `<span class="badge skipped">SKIPPED (SIZE LIMIT)</span>`;
       } else {
         statusBadge = `<span class="badge error">ERROR</span>`;
       }
 
       let details = '-';
       if (r.status === 'MATCH') {
-        details = `<span class="mono" style="color: var(--amber)">${r.signatures.join(', ')}</span>`;
+        details = `<span class="mono" style="color: var(--amber)">Matched: ${(r.signatures || []).join(', ')}</span>`;
       } else if (r.message) {
         details = `<span class="text-muted">${escapeHtml(r.message)}</span>`;
       }
@@ -424,7 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return `
         <tr>
           <td>${idx + 1}</td>
-          <td><span class="mono">W#${r.workerId}</span></td>
+          <td><span class="mono">Worker #${r.workerId}</span></td>
           <td class="mono"><strong>${escapeHtml(r.file)}</strong></td>
           <td>${statusBadge}</td>
           <td>${details}</td>
@@ -435,14 +545,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
-  // Run Benchmark Suite
+  // Benchmark Suite
   async function runBenchmark() {
     el.benchmarkPanel.style.display = 'block';
     el.benchmarkStatusBadge.textContent = 'Running Benchmark Suite...';
     el.benchmarkStatusBadge.className = 'badge purple';
     el.benchmarkTableBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Executing benchmark across 1, 2, 4, and 8 worker threads...</td></tr>';
 
-    el.btnStartScan.disabled = true;
+    el.btnStartUploadScan.disabled = true;
+    el.btnStartSamplesScan.disabled = true;
     el.btnRunBenchmark.disabled = true;
 
     try {
@@ -450,16 +561,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (!res.ok) {
         showToast(data.error || 'Benchmark initialization failed.', true);
-        el.btnStartScan.disabled = false;
+        el.btnStartUploadScan.disabled = false;
+        el.btnStartSamplesScan.disabled = false;
         el.btnRunBenchmark.disabled = false;
         return;
       }
 
-      showToast('Benchmark suite running across 1, 2, 4, and 8 worker threads...');
+      showToast('Running comparative benchmark (1, 2, 4, and 8 threads)...');
       pollBenchmarkStatus();
     } catch (e) {
       showToast(`Benchmark error: ${e.message}`, true);
-      el.btnStartScan.disabled = false;
+      el.btnStartUploadScan.disabled = false;
+      el.btnStartSamplesScan.disabled = false;
       el.btnRunBenchmark.disabled = false;
     }
   }
@@ -480,16 +593,18 @@ document.addEventListener('DOMContentLoaded', () => {
           el.benchmarkStatusBadge.textContent = 'Completed';
           el.benchmarkStatusBadge.className = 'badge emerald';
           renderBenchmarkResults(data.results);
-          el.btnStartScan.disabled = false;
+          el.btnStartUploadScan.disabled = false;
+          el.btnStartSamplesScan.disabled = false;
           el.btnRunBenchmark.disabled = false;
-          showToast('Comparative benchmark completed!');
+          showToast('Comparative speedup benchmark completed!');
         } else if (data.error) {
           clearInterval(state.benchmarkPollInterval);
           state.benchmarkPollInterval = null;
           el.benchmarkStatusBadge.textContent = 'Error';
           el.benchmarkStatusBadge.className = 'badge error';
           el.benchmarkTableBody.innerHTML = `<tr><td colspan="7" style="color: var(--coral);">Error: ${escapeHtml(data.error)}</td></tr>`;
-          el.btnStartScan.disabled = false;
+          el.btnStartUploadScan.disabled = false;
+          el.btnStartSamplesScan.disabled = false;
           el.btnRunBenchmark.disabled = false;
         }
       } catch (e) {
@@ -537,6 +652,38 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Event Listeners
+  el.tabBtnUpload.addEventListener('click', () => switchTab('upload'));
+  el.tabBtnSamples.addEventListener('click', () => switchTab('samples'));
+
+  el.userFileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileSelection(e.target.files[0]);
+    }
+  });
+
+  el.btnClearFile.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearFileSelection();
+  });
+
+  // Drag and drop
+  el.fileDropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    el.fileDropzone.classList.add('dragover');
+  });
+
+  el.fileDropzone.addEventListener('dragleave', () => {
+    el.fileDropzone.classList.remove('dragover');
+  });
+
+  el.fileDropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    el.fileDropzone.classList.remove('dragover');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileSelection(e.dataTransfer.files[0]);
+    }
+  });
+
   el.btnModeParallel.addEventListener('click', () => setMode('parallel'));
   el.btnModeSequential.addEventListener('click', () => setMode('sequential'));
 
@@ -549,7 +696,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  el.btnStartScan.addEventListener('click', startScan);
+  el.btnStartUploadScan.addEventListener('click', startUploadScan);
+  el.btnStartSamplesScan.addEventListener('click', startSamplesScan);
   el.btnStopScan.addEventListener('click', stopScan);
   el.btnRunBenchmark.addEventListener('click', runBenchmark);
   el.btnGenerateSamples.addEventListener('click', generateSamplesDataset);
@@ -562,4 +710,3 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSystemInfo();
   loadSamplesInfo();
 });
-

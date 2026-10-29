@@ -2,8 +2,10 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const readline = require('readline');
+const multer = require('multer');
 const { generateSamples, SAMPLES_DIR, SIGNATURES } = require('./sample_generator');
 
 const app = express();
@@ -13,6 +15,42 @@ const HOST = '127.0.0.1'; // Strictly bound to 127.0.0.1 as required
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const BIN_DIR = path.resolve(PROJECT_ROOT, 'bin');
 const EXECUTABLE_PATH = path.resolve(BIN_DIR, 'scanner.exe');
+const TEMP_UPLOADS_ROOT = path.resolve(PROJECT_ROOT, 'temp_uploads');
+
+// Ensure root directories exist
+if (!fs.existsSync(TEMP_UPLOADS_ROOT)) {
+  fs.mkdirSync(TEMP_UPLOADS_ROOT, { recursive: true });
+}
+
+// Clean up any stale temporary upload directories from prior runs
+function cleanupDirectorySync(dirPath) {
+  try {
+    if (fs.existsSync(dirPath)) {
+      const entries = fs.readdirSync(dirPath);
+      for (const entry of entries) {
+        const full = path.join(dirPath, entry);
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          cleanupDirectorySync(full);
+          fs.rmdirSync(full);
+        } else {
+          fs.unlinkSync(full);
+        }
+      }
+      fs.rmdirSync(dirPath);
+    }
+  } catch (err) {
+    console.error(`[Cleanup Warning] Could not remove ${dirPath}: ${err.message}`);
+  }
+}
+
+// Startup cleanup of temp_uploads
+try {
+  const staleDirs = fs.readdirSync(TEMP_UPLOADS_ROOT);
+  for (const dir of staleDirs) {
+    cleanupDirectorySync(path.join(TEMP_UPLOADS_ROOT, dir));
+  }
+} catch (e) {}
 
 app.use(express.json());
 app.use(express.static(path.resolve(PROJECT_ROOT, 'public')));
@@ -20,11 +58,14 @@ app.use(express.static(path.resolve(PROJECT_ROOT, 'public')));
 // In-memory state for active scan
 let activeScan = {
   id: null,
+  type: 'samples', // 'samples' or 'upload'
   process: null,
   status: 'idle', // 'idle' | 'running' | 'completed' | 'error' | 'stopped'
   startTime: null,
   endTime: null,
   options: null,
+  uploadDir: null,
+  metadata: {},
   progress: {
     scanned_files: 0,
     total_files: 0,
@@ -45,6 +86,36 @@ let activeBenchmark = {
   results: null,
   error: null
 };
+
+// Multer Storage Engine for per-scan temporary directories
+const uploadStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const scanId = 'upload_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    req.scanId = scanId;
+    const uploadDir = path.join(TEMP_UPLOADS_ROOT, scanId);
+    try {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      req.scanUploadDir = uploadDir;
+      cb(null, uploadDir);
+    } catch (err) {
+      cb(err);
+    }
+  },
+  filename: (req, file, cb) => {
+    // Sanitize extension and assign safe internal filename (never trust client path)
+    const rawExt = path.extname(file.originalname || '').slice(0, 16);
+    const safeExt = rawExt.replace(/[^a-zA-Z0-9._-]/g, '');
+    const safeInternalName = 'payload' + (safeExt ? safeExt : '.dat');
+    cb(null, safeInternalName);
+  }
+});
+
+const uploadMiddleware = multer({
+  storage: uploadStorage,
+  limits: {
+    fileSize: 25 * 1024 * 1024 // 25 MB max
+  }
+});
 
 // Locate available C++ compiler
 function detectCompiler() {
@@ -108,7 +179,8 @@ app.get('/api/system/info', (req, res) => {
       path: EXECUTABLE_PATH
     },
     samplesDir: SAMPLES_DIR,
-    defaultSignatures: Object.values(SIGNATURES)
+    defaultSignatures: Object.values(SIGNATURES),
+    maxUploadSizeMb: 25
   });
 });
 
@@ -169,7 +241,7 @@ app.post('/api/samples/generate', (req, res) => {
   }
 });
 
-// Start a scan
+// Start a scan on samples/ directory
 app.post('/api/scan/start', (req, res) => {
   if (activeScan.status === 'running') {
     return res.status(409).json({ error: 'A scan is currently running. Stop it before starting a new one.' });
@@ -190,7 +262,6 @@ app.post('/api/scan/start', (req, res) => {
     dir = ''
   } = req.body;
 
-  // Validate parameters strictly
   let validatedTargetDir;
   try {
     validatedTargetDir = validateTargetDirectory(dir);
@@ -202,9 +273,9 @@ app.post('/api/scan/start', (req, res) => {
   const workerCount = [1, 2, 4, 8].includes(Number(workers)) ? Number(workers) : 4;
   const validatedMaxSize = Math.max(1024, Number(maxSize) || (10 * 1024 * 1024));
 
-  // Build command-line argument array safely for spawn (NEVER shell concatenation)
   const args = [
     '--dir', validatedTargetDir,
+    '--allowed-root', SAMPLES_DIR,
     '--mode', validatedMode,
     '--workers', workerCount.toString(),
     '--signatures', (Array.isArray(signatures) ? signatures.join(',') : signatures),
@@ -212,7 +283,91 @@ app.post('/api/scan/start', (req, res) => {
     '--max-size', validatedMaxSize.toString()
   ];
 
-  const scanId = 'scan_' + Date.now();
+  const scanId = 'scan_samples_' + Date.now();
+  initiateScanProcess(scanId, 'samples', args, validatedMode, workerCount, {
+    mode: validatedMode,
+    workers: workerCount,
+    signatures,
+    extensions,
+    maxSize: validatedMaxSize,
+    dir: validatedTargetDir
+  }, null, {}, res);
+});
+
+// Secure Upload-and-Scan Endpoint for user-selected local files
+app.post('/api/scan/upload', (req, res) => {
+  if (activeScan.status === 'running') {
+    return res.status(409).json({ error: 'A scan is currently running. Please wait or stop the current scan.' });
+  }
+
+  uploadMiddleware.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'Upload rejected: File size exceeds the maximum limit of 25 MB.' });
+      }
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    }
+
+    if (!req.file) {
+      if (req.scanUploadDir) cleanupDirectorySync(req.scanUploadDir);
+      return res.status(400).json({ error: 'No file was provided for scanning.' });
+    }
+
+    if (!fs.existsSync(EXECUTABLE_PATH)) {
+      if (req.scanUploadDir) cleanupDirectorySync(req.scanUploadDir);
+      return res.status(400).json({
+        error: 'Scanner executable (bin/scanner.exe) not found. Please compile the C++ engine first using scripts\\build.bat.'
+      });
+    }
+
+    const {
+      mode = 'parallel',
+      workers = 4,
+      signatures = Object.values(SIGNATURES),
+      maxSize = 25 * 1024 * 1024
+    } = req.body;
+
+    const validatedMode = (mode === 'sequential') ? 'sequential' : 'parallel';
+    const workerCount = [1, 2, 4, 8].includes(Number(workers)) ? Number(workers) : 4;
+    const validatedMaxSize = Math.min(25 * 1024 * 1024, Math.max(1, Number(maxSize) || (25 * 1024 * 1024)));
+
+    let parsedSignatures = signatures;
+    if (typeof signatures === 'string') {
+      parsedSignatures = signatures.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (!Array.isArray(parsedSignatures) || parsedSignatures.length === 0) {
+      parsedSignatures = Object.values(SIGNATURES);
+    }
+
+    // Build safe argument array for spawn (NEVER shell concatenation)
+    const args = [
+      '--file', req.file.path,
+      '--allowed-root', req.scanUploadDir,
+      '--all-extensions',
+      '--mode', validatedMode,
+      '--workers', workerCount.toString(),
+      '--signatures', parsedSignatures.join(','),
+      '--max-size', validatedMaxSize.toString()
+    ];
+
+    const metadata = {
+      originalFilename: req.file.originalname || 'unknown_file',
+      originalSize: req.file.size,
+      mimetype: req.file.mimetype || 'application/octet-stream'
+    };
+
+    initiateScanProcess(req.scanId, 'upload', args, validatedMode, workerCount, {
+      mode: validatedMode,
+      workers: workerCount,
+      signatures: parsedSignatures,
+      maxSize: validatedMaxSize,
+      file: metadata.originalFilename
+    }, req.scanUploadDir, metadata, res);
+  });
+});
+
+// Common process initiation and lifecycle handling
+function initiateScanProcess(scanId, type, args, mode, workerCount, options, uploadDir, metadata, res) {
   const workerInitMap = {};
   for (let w = 1; w <= workerCount; w++) {
     workerInitMap[w] = { id: w, file: 'Waiting...', status: 'idle', count: 0 };
@@ -220,21 +375,17 @@ app.post('/api/scan/start', (req, res) => {
 
   activeScan = {
     id: scanId,
+    type,
     process: null,
     status: 'running',
     startTime: Date.now(),
     endTime: null,
-    options: {
-      mode: validatedMode,
-      workers: workerCount,
-      signatures,
-      extensions,
-      maxSize: validatedMaxSize,
-      dir: validatedTargetDir
-    },
+    options,
+    uploadDir,
+    metadata,
     progress: {
       scanned_files: 0,
-      total_files: 0,
+      total_files: (type === 'upload' ? 1 : 0),
       percentage: 0
     },
     workers: workerInitMap,
@@ -245,7 +396,6 @@ app.post('/api/scan/start', (req, res) => {
   };
 
   try {
-    // Launch child process with safe argument array
     const child = spawn(EXECUTABLE_PATH, args, {
       cwd: PROJECT_ROOT,
       windowsHide: true
@@ -270,9 +420,7 @@ app.post('/api/scan/start', (req, res) => {
       try {
         const event = JSON.parse(trimmed);
         handleScanEvent(event);
-      } catch (e) {
-        // Non-JSON diagnostic output
-      }
+      } catch (e) {}
     });
 
     child.stderr.on('data', (data) => {
@@ -286,6 +434,7 @@ app.post('/api/scan/start', (req, res) => {
       activeScan.status = 'error';
       activeScan.error = `Failed to start process: ${err.message}`;
       activeScan.endTime = Date.now();
+      if (uploadDir) cleanupDirectorySync(uploadDir);
     });
 
     child.on('close', (code) => {
@@ -297,57 +446,84 @@ app.post('/api/scan/start', (req, res) => {
         }
       }
       activeScan.process = null;
+      // Clean up temporary upload files immediately after scan finishes
+      if (uploadDir) {
+        cleanupDirectorySync(uploadDir);
+        activeScan.uploadDir = null;
+      }
     });
 
     res.json({
       success: true,
       scanId,
       status: 'running',
-      options: activeScan.options
+      type,
+      options: activeScan.options,
+      metadata: activeScan.metadata
     });
   } catch (err) {
     activeScan.status = 'error';
     activeScan.error = err.message;
+    if (uploadDir) cleanupDirectorySync(uploadDir);
     res.status(500).json({ error: err.message });
   }
-});
+}
 
 function handleScanEvent(event) {
   if (!event || !event.type) return;
 
   switch (event.type) {
     case 'init':
-      activeScan.progress.total_files = event.total_files || 0;
+      activeScan.progress.total_files = event.total_files || (activeScan.type === 'upload' ? 1 : 0);
       break;
 
     case 'file_start':
       if (activeScan.workers[event.worker_id]) {
-        activeScan.workers[event.worker_id].file = event.file;
+        const displayName = (activeScan.type === 'upload' && activeScan.metadata.originalFilename)
+          ? activeScan.metadata.originalFilename
+          : event.file;
+        activeScan.workers[event.worker_id].file = displayName;
         activeScan.workers[event.worker_id].status = 'scanning';
       }
       break;
 
-    case 'file_done':
+    case 'file_done': {
+      const displayName = (activeScan.type === 'upload' && activeScan.metadata.originalFilename)
+        ? activeScan.metadata.originalFilename
+        : event.file;
+
       if (activeScan.workers[event.worker_id]) {
         activeScan.workers[event.worker_id].status = 'idle';
         activeScan.workers[event.worker_id].count++;
-        activeScan.workers[event.worker_id].file = `Completed: ${path.basename(event.file)}`;
+        activeScan.workers[event.worker_id].file = `Completed: ${path.basename(displayName)}`;
       }
+
+      // Clarify educational status message
+      let statusDesc = event.message;
+      if (event.status === 'MATCH') {
+        statusDesc = `Test signature matched (${(event.signatures || []).join(', ')})`;
+      } else if (event.status === 'CLEAN') {
+        statusDesc = 'No configured test signature matched';
+      } else if (event.status === 'SKIPPED') {
+        statusDesc = 'Skipped: file exceeds configured size limit';
+      }
+
       activeScan.results.push({
         workerId: event.worker_id,
-        file: event.file,
+        file: displayName,
         fileSize: event.file_size || 0,
         status: event.status, // "CLEAN", "MATCH", "SKIPPED", "ERROR"
         signatures: event.signatures || [],
         bytesScanned: event.bytes_scanned,
         durationUs: event.duration_us,
-        message: event.message
+        message: statusDesc
       });
       break;
+    }
 
     case 'progress':
       activeScan.progress.scanned_files = event.scanned_files;
-      activeScan.progress.total_files = event.total_files;
+      activeScan.progress.total_files = event.total_files || (activeScan.type === 'upload' ? 1 : activeScan.progress.total_files);
       activeScan.progress.percentage = event.percentage;
       break;
 
@@ -373,6 +549,8 @@ function handleScanEvent(event) {
 app.get('/api/scan/status', (req, res) => {
   res.json({
     id: activeScan.id,
+    type: activeScan.type,
+    metadata: activeScan.metadata,
     status: activeScan.status,
     startTime: activeScan.startTime,
     endTime: activeScan.endTime,
@@ -394,6 +572,10 @@ app.post('/api/scan/stop', (req, res) => {
       activeScan.process.kill();
       activeScan.status = 'stopped';
       activeScan.endTime = Date.now();
+      if (activeScan.uploadDir) {
+        cleanupDirectorySync(activeScan.uploadDir);
+        activeScan.uploadDir = null;
+      }
       return res.json({ success: true, message: 'Scan cancelled successfully.' });
     } catch (err) {
       return res.status(500).json({ error: `Failed to terminate scan: ${err.message}` });
@@ -407,6 +589,7 @@ function runSingleBenchmark(mode, workers) {
   return new Promise((resolve, reject) => {
     const args = [
       '--dir', SAMPLES_DIR,
+      '--allowed-root', SAMPLES_DIR,
       '--mode', mode,
       '--workers', workers.toString(),
       '--signatures', Object.values(SIGNATURES).join(','),
@@ -442,7 +625,7 @@ function runSingleBenchmark(mode, workers) {
   });
 }
 
-// Run comparative benchmark suite
+// Run comparative benchmark suite over samples/
 app.post('/api/benchmark/run', async (req, res) => {
   if (activeScan.status === 'running' || activeBenchmark.running) {
     return res.status(409).json({ error: 'A scan or benchmark is already running.' });
@@ -519,11 +702,14 @@ app.get('/api/benchmark/status', (req, res) => {
 });
 
 // Start express server
-app.listen(PORT, HOST, () => {
-  console.log(`=======================================================`);
-  console.log(` ThreadShield — Multithreaded File Scanner Dashboard`);
-  console.log(` Operating Systems Concurrent Architecture Project`);
-  console.log(` URL: http://${HOST}:${PORT}`);
-  console.log(`=======================================================`);
-});
+if (require.main === module) {
+  app.listen(PORT, HOST, () => {
+    console.log(`=======================================================`);
+    console.log(` ThreadShield — Multithreaded File Scanner Dashboard`);
+    console.log(` Operating Systems Concurrent Architecture Project`);
+    console.log(` URL: http://${HOST}:${PORT}`);
+    console.log(`=======================================================`);
+  });
+}
 
+module.exports = app;

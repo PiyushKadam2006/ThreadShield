@@ -62,12 +62,14 @@ public:
 
 // Configuration options
 struct ScanOptions {
-    std::string target_dir;
-    std::string canonical_samples_root;
+    std::string target_path;
+    std::string allowed_root;
+    std::string canonical_allowed_root;
     std::string mode = "parallel"; // "sequential" or "parallel"
     int worker_count = 4;
     std::vector<std::string> signatures;
     std::vector<std::string> extensions;
+    bool all_extensions = false;
     uint64_t max_file_size = 10 * 1024 * 1024; // 10MB default
 };
 
@@ -141,7 +143,7 @@ FileScanResult scan_single_file(int worker_id, const ScanTask& task, const ScanO
         return result;
     }
 
-    // 2. Open file strictly read-only
+    // 2. Open file strictly read-only binary mode
     std::ifstream file(task.full_path, std::ios::binary);
     if (!file.is_open()) {
         auto end_time = std::chrono::high_resolution_clock::now();
@@ -198,10 +200,10 @@ FileScanResult scan_single_file(int worker_id, const ScanTask& task, const ScanO
     if (!found_signatures.empty()) {
         result.status = "MATCH";
         result.matched_signatures = found_signatures;
-        result.message = "Educational test detection: matched test signature pattern(s)";
+        result.message = "Educational test detection: matched configured test signature(s)";
     } else {
         result.status = "CLEAN";
-        result.message = "No test signatures detected";
+        result.message = "No configured test signature matched";
     }
 
     return result;
@@ -308,7 +310,8 @@ std::vector<std::string> split_comma(const std::string& s) {
 
 int main(int argc, char* argv[]) {
     ScanOptions options;
-    std::string input_dir = "samples";
+    std::string input_target = "samples";
+    std::string user_allowed_root = "";
 
     // Default test signatures
     options.signatures = {
@@ -323,8 +326,10 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--dir" && i + 1 < argc) {
-            input_dir = argv[++i];
+        if ((arg == "--dir" || arg == "--file" || arg == "--target") && i + 1 < argc) {
+            input_target = argv[++i];
+        } else if (arg == "--allowed-root" && i + 1 < argc) {
+            user_allowed_root = argv[++i];
         } else if (arg == "--mode" && i + 1 < argc) {
             options.mode = argv[++i];
         } else if (arg == "--workers" && i + 1 < argc) {
@@ -333,7 +338,16 @@ int main(int argc, char* argv[]) {
             std::vector<std::string> parsed = split_comma(argv[++i]);
             if (!parsed.empty()) options.signatures = parsed;
         } else if (arg == "--extensions" && i + 1 < argc) {
-            options.extensions = split_comma(argv[++i]);
+            std::string ext_val = argv[++i];
+            if (ext_val == "*" || ext_val == "all" || ext_val.empty()) {
+                options.all_extensions = true;
+                options.extensions.clear();
+            } else {
+                options.extensions = split_comma(ext_val);
+            }
+        } else if (arg == "--all-extensions") {
+            options.all_extensions = true;
+            options.extensions.clear();
         } else if (arg == "--max-size" && i + 1 < argc) {
             options.max_file_size = std::stoull(argv[++i]);
         }
@@ -347,31 +361,67 @@ int main(int argc, char* argv[]) {
         if (options.worker_count > 32) options.worker_count = 32;
     }
 
-    // Security Verification: Target must strictly reside within dedicated samples/ directory
+    // Security Verification:
+    // The target path must reside strictly within an authorized project directory.
+    // Authorized root directories are project 'samples' or 'temp_uploads' (for uploaded files).
     try {
-        fs::path samples_root = fs::current_path() / "samples";
-        if (!fs::exists(samples_root)) {
-            fs::create_directories(samples_root);
-        }
-        std::string canonical_root = fs::weakly_canonical(samples_root).string();
-        options.canonical_samples_root = canonical_root;
+        fs::path project_root = fs::current_path();
+        fs::path samples_dir = project_root / "samples";
+        fs::path temp_uploads_dir = project_root / "temp_uploads";
 
-        fs::path requested_path = fs::path(input_dir);
+        if (!fs::exists(samples_dir)) {
+            fs::create_directories(samples_dir);
+        }
+        if (!fs::exists(temp_uploads_dir)) {
+            fs::create_directories(temp_uploads_dir);
+        }
+
+        std::string canonical_samples = fs::weakly_canonical(samples_dir).string();
+        std::string canonical_uploads = fs::weakly_canonical(temp_uploads_dir).string();
+
+        fs::path chosen_root;
+        if (!user_allowed_root.empty()) {
+            chosen_root = fs::path(user_allowed_root);
+            if (!chosen_root.is_absolute()) {
+                chosen_root = project_root / chosen_root;
+            }
+            std::string canonical_chosen = fs::weakly_canonical(chosen_root).string();
+
+            // Verify that the chosen allowed-root is strictly inside samples/ or temp_uploads/
+            bool inside_samples = (canonical_chosen.rfind(canonical_samples, 0) == 0);
+            bool inside_uploads = (canonical_chosen.rfind(canonical_uploads, 0) == 0);
+
+            if (!inside_samples && !inside_uploads) {
+                std::ostringstream ss;
+                ss << "{\"type\":\"error\",\"message\":\"Security violation: Allowed root '"
+                   << escape_json(user_allowed_root)
+                   << "' must reside strictly within project samples/ or temp_uploads/.\"}";
+                emit_json_line(ss.str());
+                return 1;
+            }
+            options.canonical_allowed_root = canonical_chosen;
+        } else {
+            // Default to samples directory
+            options.canonical_allowed_root = canonical_samples;
+        }
+
+        fs::path requested_path = fs::path(input_target);
         if (!requested_path.is_absolute()) {
-            requested_path = fs::current_path() / requested_path;
+            requested_path = project_root / requested_path;
         }
         std::string canonical_requested = fs::weakly_canonical(requested_path).string();
 
-        // Check if canonical_requested starts with canonical_root
-        if (canonical_requested.rfind(canonical_root, 0) != 0) {
+        // Check if canonical_requested starts with canonical_allowed_root
+        if (canonical_requested.rfind(options.canonical_allowed_root, 0) != 0) {
             std::ostringstream ss;
             ss << "{\"type\":\"error\",\"message\":\"Security violation: Scan target path '"
-               << escape_json(input_dir)
-               << "' is outside the dedicated samples/ directory. Scans are strictly restricted to samples/.\"}";
+               << escape_json(input_target)
+               << "' is outside the dedicated directory boundary. Scans are strictly restricted to authorized project paths.\"}";
             emit_json_line(ss.str());
             return 1;
         }
-        options.target_dir = canonical_requested;
+
+        options.target_path = canonical_requested;
     } catch (const std::exception& e) {
         std::ostringstream ss;
         ss << "{\"type\":\"error\",\"message\":\"Filesystem security check failed: "
@@ -380,45 +430,69 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Collect all candidate files
+    // Collect target candidate files
     std::vector<ScanTask> tasks;
     try {
-        if (fs::exists(options.target_dir) && fs::is_directory(options.target_dir)) {
-            for (const auto& entry : fs::recursive_directory_iterator(options.target_dir)) {
-                if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
-                    // Lowercase extension
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (fs::exists(options.target_path)) {
+            if (fs::is_regular_file(options.target_path)) {
+                // Single file target (e.g. user-uploaded file)
+                fs::path p(options.target_path);
+                std::string ext = p.extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-                    // Check extension filter
-                    bool ext_matched = false;
-                    if (options.extensions.empty()) {
-                        ext_matched = true;
-                    } else {
-                        for (const auto& target_ext : options.extensions) {
-                            std::string lext = target_ext;
-                            std::transform(lext.begin(), lext.end(), lext.begin(), ::tolower);
-                            if (lext == ext) {
-                                ext_matched = true;
-                                break;
-                            }
+                bool ext_matched = options.all_extensions || options.extensions.empty();
+                if (!ext_matched) {
+                    for (const auto& target_ext : options.extensions) {
+                        std::string lext = target_ext;
+                        std::transform(lext.begin(), lext.end(), lext.begin(), ::tolower);
+                        if (lext == ext) {
+                            ext_matched = true;
+                            break;
                         }
                     }
+                }
 
-                    if (ext_matched) {
-                        ScanTask task;
-                        task.full_path = entry.path().string();
-                        // Relative path from samples root
-                        task.relative_path = fs::relative(entry.path(), options.canonical_samples_root).string();
-                        task.file_size = static_cast<uint64_t>(entry.file_size());
-                        tasks.push_back(task);
+                if (ext_matched) {
+                    ScanTask task;
+                    task.full_path = options.target_path;
+                    std::string rel = fs::relative(p, options.canonical_allowed_root).string();
+                    task.relative_path = rel.empty() ? p.filename().string() : rel;
+                    task.file_size = static_cast<uint64_t>(fs::file_size(p));
+                    tasks.push_back(task);
+                }
+            } else if (fs::is_directory(options.target_path)) {
+                // Directory target (recursive scanning)
+                for (const auto& entry : fs::recursive_directory_iterator(options.target_path)) {
+                    if (entry.is_regular_file()) {
+                        std::string ext = entry.path().extension().string();
+                        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+                        bool ext_matched = options.all_extensions || options.extensions.empty();
+                        if (!ext_matched) {
+                            for (const auto& target_ext : options.extensions) {
+                                std::string lext = target_ext;
+                                std::transform(lext.begin(), lext.end(), lext.begin(), ::tolower);
+                                if (lext == ext) {
+                                    ext_matched = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (ext_matched) {
+                            ScanTask task;
+                            task.full_path = entry.path().string();
+                            task.relative_path = fs::relative(entry.path(), options.canonical_allowed_root).string();
+                            task.file_size = static_cast<uint64_t>(entry.file_size());
+                            tasks.push_back(task);
+                        }
                     }
                 }
             }
         }
     } catch (const std::exception& e) {
         std::ostringstream ss;
-        ss << "{\"type\":\"error\",\"message\":\"Error traversing target directory: "
+        ss << "{\"type\":\"error\",\"message\":\"Error accessing target: "
            << escape_json(e.what()) << "\"}";
         emit_json_line(ss.str());
         return 1;
@@ -431,8 +505,9 @@ int main(int argc, char* argv[]) {
            << "\"mode\":\"" << options.mode << "\","
            << "\"worker_count\":" << options.worker_count << ","
            << "\"total_files\":" << tasks.size() << ","
-           << "\"target_dir\":\"" << escape_json(normalize_path_display(input_dir)) << "\","
+           << "\"target_path\":\"" << escape_json(normalize_path_display(input_target)) << "\","
            << "\"max_size\":" << options.max_file_size << ","
+           << "\"all_extensions\":" << (options.all_extensions ? "true" : "false") << ","
            << "\"signatures\":[";
         for (size_t i = 0; i < options.signatures.size(); ++i) {
             if (i > 0) ss << ",";
@@ -522,4 +597,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
