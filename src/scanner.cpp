@@ -93,25 +93,29 @@ struct FileScanResult {
 std::mutex g_cout_mutex;
 
 std::string escape_json(const std::string& input) {
-    std::ostringstream ss;
+    std::string res;
+    res.reserve(input.size() + 16);
     for (char c : input) {
         switch (c) {
-            case '"':  ss << "\\\""; break;
-            case '\\': ss << "\\\\"; break;
-            case '\b': ss << "\\b";  break;
-            case '\f': ss << "\\f";  break;
-            case '\n': ss << "\\n";  break;
-            case '\r': ss << "\\r";  break;
-            case '\t': ss << "\\t";  break;
+            case '"':  res += "\\\""; break;
+            case '\\': res += "\\\\"; break;
+            case '\b': res += "\\b";  break;
+            case '\f': res += "\\f";  break;
+            case '\n': res += "\\n";  break;
+            case '\r': res += "\\r";  break;
+            case '\t': res += "\\t";  break;
             default:
-                if ('\x00' <= c && c <= '\x1f') {
-                    ss << "\\u" << std::hex << std::setw(4) << std::setfill('0') << (int)c;
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char hex_buf[7];
+                    std::snprintf(hex_buf, sizeof(hex_buf), "\\u%04x", static_cast<unsigned char>(c));
+                    res += hex_buf;
                 } else {
-                    ss << c;
+                    res += c;
                 }
+                break;
         }
     }
-    return ss.str();
+    return res;
 }
 
 void emit_json_line(const std::string& json_str) {
@@ -163,8 +167,10 @@ FileScanResult scan_single_file(int worker_id, const ScanTask& task, const ScanO
 
     const size_t CHUNK_SIZE = 64 * 1024; // 64 KB
     std::vector<char> buffer(CHUNK_SIZE);
-    std::string carry_over = "";
+    std::string carry_over;
     std::vector<std::string> found_signatures;
+    std::string current_chunk;
+    current_chunk.reserve(CHUNK_SIZE + max_sig_len + 16);
 
     while (file) {
         file.read(buffer.data(), CHUNK_SIZE);
@@ -173,20 +179,21 @@ FileScanResult scan_single_file(int worker_id, const ScanTask& task, const ScanO
 
         result.bytes_scanned += static_cast<uint64_t>(bytes_read);
 
-        // Build search chunk including carry-over from previous block to avoid missing boundary splits
-        std::string current_chunk = carry_over;
+        current_chunk = carry_over;
         current_chunk.append(buffer.data(), bytes_read);
 
-        // Scan chunk for all enabled signatures
-        for (const auto& sig : options.signatures) {
-            if (std::find(found_signatures.begin(), found_signatures.end(), sig) == found_signatures.end()) {
-                if (current_chunk.find(sig) != std::string::npos) {
-                    found_signatures.push_back(sig);
+        // Check remaining unmatched signatures
+        if (found_signatures.size() < options.signatures.size()) {
+            for (const auto& sig : options.signatures) {
+                if (std::find(found_signatures.begin(), found_signatures.end(), sig) == found_signatures.end()) {
+                    if (current_chunk.find(sig) != std::string::npos) {
+                        found_signatures.push_back(sig);
+                    }
                 }
             }
         }
 
-        // Maintain carry-over buffer for next chunk
+        // Maintain boundary carry-over buffer for next chunk
         if (current_chunk.length() > max_sig_len) {
             carry_over = current_chunk.substr(current_chunk.length() - max_sig_len);
         } else {
@@ -451,12 +458,16 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Normalize target extensions to lowercase once for fast comparison
+    for (auto& ext : options.extensions) {
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    }
+
     // Collect target candidate files
     std::vector<ScanTask> tasks;
     try {
         if (fs::exists(options.target_path)) {
             if (fs::is_regular_file(options.target_path)) {
-                // Single file target (e.g. user-uploaded file)
                 fs::path p(options.target_path);
                 std::string ext = p.extension().string();
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -464,9 +475,7 @@ int main(int argc, char* argv[]) {
                 bool ext_matched = options.all_extensions || options.extensions.empty();
                 if (!ext_matched) {
                     for (const auto& target_ext : options.extensions) {
-                        std::string lext = target_ext;
-                        std::transform(lext.begin(), lext.end(), lext.begin(), ::tolower);
-                        if (lext == ext) {
+                        if (target_ext == ext) {
                             ext_matched = true;
                             break;
                         }
@@ -482,7 +491,6 @@ int main(int argc, char* argv[]) {
                     tasks.push_back(task);
                 }
             } else if (fs::is_directory(options.target_path)) {
-                // Directory target (recursive scanning)
                 for (const auto& entry : fs::recursive_directory_iterator(options.target_path)) {
                     if (entry.is_regular_file()) {
                         std::string ext = entry.path().extension().string();
@@ -491,9 +499,7 @@ int main(int argc, char* argv[]) {
                         bool ext_matched = options.all_extensions || options.extensions.empty();
                         if (!ext_matched) {
                             for (const auto& target_ext : options.extensions) {
-                                std::string lext = target_ext;
-                                std::transform(lext.begin(), lext.end(), lext.begin(), ::tolower);
-                                if (lext == ext) {
+                                if (target_ext == ext) {
                                     ext_matched = true;
                                     break;
                                 }

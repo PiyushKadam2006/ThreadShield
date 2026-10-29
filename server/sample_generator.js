@@ -19,17 +19,7 @@ function ensureDirSync(dirPath) {
 
 function cleanDirectorySync(dirPath) {
   if (fs.existsSync(dirPath)) {
-    const entries = fs.readdirSync(dirPath);
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry);
-      const stat = fs.statSync(fullPath);
-      if (stat.isDirectory()) {
-        cleanDirectorySync(fullPath);
-        fs.rmdirSync(fullPath);
-      } else {
-        fs.unlinkSync(fullPath);
-      }
-    }
+    fs.rmSync(dirPath, { recursive: true, force: true });
   }
 }
 
@@ -126,7 +116,8 @@ function generateSamples() {
     let rows = ['tx_id,timestamp,amount,status,reference'];
     for (let r = 1000; r < 1100; r++) {
       let ref = (i === 3 && r === 1050) ? `REF_${SIGNATURES.BETA}` : `REF_${r * 13}`;
-      rows.push(`${r},2026-10-29T12:00:00Z,${(Math.random() * 500).toFixed(2)},COMPLETED,${ref}`);
+      const amount = (((r * 9301 + i * 49297) % 233280) / 233280 * 500).toFixed(2);
+      rows.push(`${r},2026-10-29T12:00:00Z,${amount},COMPLETED,${ref}`);
     }
     writeFile(`transactions/batch_${i}.csv`, rows.join('\n'));
   }

@@ -283,8 +283,8 @@ body {
 /* Pill Group */
 .pill-group {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
 }
 
 .pill-btn {
@@ -1294,12 +1294,5 @@ body {
 
 .worker-status-dot.unassigned {
   background-color: #475569;
-}
-
-/* Update Pill Group for 5 items (Auto, 1, 2, 4, 8) */
-.pill-group {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
 }
 

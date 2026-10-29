@@ -22,22 +22,11 @@ if (!fs.existsSync(TEMP_UPLOADS_ROOT)) {
   fs.mkdirSync(TEMP_UPLOADS_ROOT, { recursive: true });
 }
 
-// Clean up any stale temporary upload directories from prior runs
+// Clean up temporary upload directories safely
 function cleanupDirectorySync(dirPath) {
   try {
     if (fs.existsSync(dirPath)) {
-      const entries = fs.readdirSync(dirPath);
-      for (const entry of entries) {
-        const full = path.join(dirPath, entry);
-        const stat = fs.statSync(full);
-        if (stat.isDirectory()) {
-          cleanupDirectorySync(full);
-          fs.rmdirSync(full);
-        } else {
-          fs.unlinkSync(full);
-        }
-      }
-      fs.rmdirSync(dirPath);
+      fs.rmSync(dirPath, { recursive: true, force: true });
     }
   } catch (err) {
     console.error(`[Cleanup Warning] Could not remove ${dirPath}: ${err.message}`);
@@ -127,8 +116,10 @@ const uploadMiddleware = multer({
   }
 });
 
-// Locate available C++ compiler
+// Locate available C++ compiler (cached)
+let cachedCompiler = null;
 function detectCompiler() {
+  if (cachedCompiler) return cachedCompiler;
   const possiblePaths = [
     path.join(process.env.LOCALAPPDATA || '', 'w64devkit', 'bin', 'g++.exe'),
     'C:\\MinGW\\bin\\g++.exe',
@@ -139,15 +130,19 @@ function detectCompiler() {
   for (const p of possiblePaths) {
     try {
       if (fs.existsSync(p)) {
-        return { available: true, path: p, type: 'g++' };
+        cachedCompiler = { available: true, path: p, type: 'g++' };
+        return cachedCompiler;
       }
     } catch (e) {}
   }
-  return { available: false, path: null, type: null };
+  cachedCompiler = { available: false, path: null, type: null };
+  return cachedCompiler;
 }
 
-// Locate Microsoft Defender CLI (MpCmdRun.exe)
+// Locate Microsoft Defender CLI (cached)
+let cachedDefender = null;
 function detectDefender() {
+  if (cachedDefender) return cachedDefender;
   const defenderPaths = [
     'C:\\Program Files\\Windows Defender\\MpCmdRun.exe',
     'C:\\Program Files (x86)\\Windows Defender\\MpCmdRun.exe'
@@ -156,11 +151,13 @@ function detectDefender() {
   for (const p of defenderPaths) {
     try {
       if (fs.existsSync(p)) {
-        return { available: true, path: p, name: 'Microsoft Defender Antivirus CLI' };
+        cachedDefender = { available: true, path: p, name: 'Microsoft Defender Antivirus CLI' };
+        return cachedDefender;
       }
     } catch (e) {}
   }
-  return { available: false, path: null, name: null };
+  cachedDefender = { available: false, path: null, name: null };
+  return cachedDefender;
 }
 
 // Security: Validate target directory resides strictly inside samples/
@@ -524,8 +521,8 @@ function initiateScanProcess(scanId, type, engine, args, mode, workerCount, opti
       if (!trimmed) return;
 
       activeScan.logs.push(trimmed);
-      if (activeScan.logs.length > 400) {
-        activeScan.logs.shift();
+      if (activeScan.logs.length > 450) {
+        activeScan.logs.splice(0, 50);
       }
 
       try {

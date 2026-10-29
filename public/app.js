@@ -367,6 +367,9 @@ Note: This is a harmless academic test payload generated to demonstrate multithr
   }
 
   // Worker Cards UI
+  // Worker Cards UI Cache
+  const workerCardCache = {};
+
   function initWorkerCards(workerCount, customTitle = null) {
     el.workerGrid.innerHTML = '';
     const label = customTitle || `${workerCount} Worker Thread${workerCount > 1 ? 's' : ''} Configured`;
@@ -385,41 +388,51 @@ Note: This is a harmless academic test payload generated to demonstrate multithr
         <div class="worker-count" id="worker-count-${i}">0 tasks processed</div>
       `;
       el.workerGrid.appendChild(card);
+
+      workerCardCache[i] = {
+        card,
+        dot: card.querySelector(`#worker-dot-${i}`),
+        fileLabel: card.querySelector(`#worker-file-${i}`),
+        countLabel: card.querySelector(`#worker-count-${i}`),
+        lastStatus: null,
+        lastFile: null,
+        lastCount: null
+      };
     }
   }
 
   function updateWorkerCard(id, file, status, count, tasksProcessed, wasActive) {
-    const card = document.getElementById(`worker-card-${id}`);
-    const dot = document.getElementById(`worker-dot-${id}`);
-    const fileLabel = document.getElementById(`worker-file-${id}`);
-    const countLabel = document.getElementById(`worker-count-${id}`);
+    const cached = workerCardCache[id];
+    if (!cached) return;
 
-    if (!card) return;
+    const finalCount = (tasksProcessed !== undefined) ? tasksProcessed : (count || 0);
 
-    if (status === 'scanning') {
-      card.className = 'worker-card active';
-      dot.className = 'worker-status-dot scanning';
-      fileLabel.textContent = file;
-    } else if (status === 'finished') {
-      card.classList.remove('active');
-      if (wasActive === false || (tasksProcessed === 0 && count === 0)) {
-        card.className = 'worker-card unassigned';
-        dot.className = 'worker-status-dot unassigned';
-        fileLabel.textContent = 'Unassigned / Idle (0 tasks)';
+    if (cached.lastStatus !== status || cached.lastFile !== file || cached.lastCount !== finalCount) {
+      cached.lastStatus = status;
+      cached.lastFile = file;
+      cached.lastCount = finalCount;
+
+      if (status === 'scanning') {
+        cached.card.className = 'worker-card active';
+        cached.dot.className = 'worker-status-dot scanning';
+        cached.fileLabel.textContent = file;
+      } else if (status === 'finished') {
+        if (wasActive === false || (tasksProcessed === 0 && count === 0)) {
+          cached.card.className = 'worker-card unassigned';
+          cached.dot.className = 'worker-status-dot unassigned';
+          cached.fileLabel.textContent = 'Unassigned / Idle (0 tasks)';
+        } else {
+          cached.card.className = 'worker-card';
+          cached.dot.className = 'worker-status-dot finished';
+          cached.fileLabel.textContent = file || 'Completed';
+        }
       } else {
-        card.className = 'worker-card';
-        dot.className = 'worker-status-dot finished';
-        fileLabel.textContent = file || 'Completed';
+        cached.card.className = 'worker-card';
+        cached.dot.className = 'worker-status-dot';
+        cached.fileLabel.textContent = file || 'Idle';
       }
-    } else {
-      card.className = 'worker-card';
-      dot.className = 'worker-status-dot';
-      fileLabel.textContent = file || 'Idle';
-    }
 
-    if (countLabel) {
-      const finalCount = (tasksProcessed !== undefined) ? tasksProcessed : (count || 0);
-      countLabel.textContent = `${finalCount} task${finalCount === 1 ? '' : 's'} processed`;
+      cached.countLabel.textContent = `${finalCount} task${finalCount === 1 ? '' : 's'} processed`;
     }
   }
 
@@ -573,23 +586,43 @@ Note: This is a harmless academic test payload generated to demonstrate multithr
   }
 
   // Polling Status Loop
+  let isPolling = false;
+  let lastProgressScanned = -1;
+  let lastProgressTotal = -1;
+  let lastProgressPct = -1;
+  let lastLogCount = -1;
+
   function pollScanStatus() {
     if (state.pollInterval) clearInterval(state.pollInterval);
+    isPolling = false;
+    lastProgressScanned = -1;
+    lastProgressTotal = -1;
+    lastProgressPct = -1;
+    lastLogCount = -1;
 
     state.pollInterval = setInterval(async () => {
+      if (isPolling) return; // Prevent request piling
+      isPolling = true;
+
       try {
         const res = await fetch('/api/scan/status');
         const data = await res.json();
 
-        // Update progress
+        // Update progress only when values change
         const pct = (data.progress.percentage || 0).toFixed(1);
-        el.progressBarFill.style.width = `${pct}%`;
         const total = data.progress.total_files || 0;
         const scanned = data.progress.scanned_files || 0;
-        el.progressText.textContent = `${scanned} / ${total} files (${pct}%)`;
-        el.metricQueueStatus.textContent = `${scanned} / ${total}`;
 
-        // Update workers
+        if (pct !== lastProgressPct || scanned !== lastProgressScanned || total !== lastProgressTotal) {
+          lastProgressPct = pct;
+          lastProgressScanned = scanned;
+          lastProgressTotal = total;
+          el.progressBarFill.style.width = `${pct}%`;
+          el.progressText.textContent = `${scanned} / ${total} files (${pct}%)`;
+          el.metricQueueStatus.textContent = `${scanned} / ${total}`;
+        }
+
+        // Update workers (cached DOM checks internally)
         if (data.workers) {
           for (const [wId, wData] of Object.entries(data.workers)) {
             updateWorkerCard(wId, wData.file, wData.status, wData.count, wData.tasksProcessed, wData.wasActive);
@@ -604,16 +637,18 @@ Note: This is a harmless academic test payload generated to demonstrate multithr
           el.activeWorkerBadge.textContent = `${cfg} Workers Configured (${act} Active, ${idl} Idle)`;
         }
 
-        // Update logs & log count
-        if (data.recentLogs && data.recentLogs.length > 0) {
-          el.logCount.textContent = `${data.recentLogs.length} events logged`;
+        // Update logs only when new log lines arrive
+        const logLen = data.recentLogs ? data.recentLogs.length : 0;
+        if (logLen !== lastLogCount && logLen > 0) {
+          lastLogCount = logLen;
+          el.logCount.textContent = `${logLen} events logged`;
           el.terminalLogs.innerHTML = data.recentLogs
             .map(line => `<div class="log-line">${escapeHtml(line)}</div>`)
             .join('');
           el.terminalLogs.scrollTop = el.terminalLogs.scrollHeight;
         }
 
-        // Update results table
+        // Update results table only when count changes
         if (data.results && data.results.length !== state.allResults.length) {
           state.allResults = data.results;
           renderResultsTable();
@@ -656,6 +691,8 @@ Note: This is a harmless academic test payload generated to demonstrate multithr
         }
       } catch (e) {
         console.error('Polling error:', e);
+      } finally {
+        isPolling = false;
       }
     }, 180);
   }
